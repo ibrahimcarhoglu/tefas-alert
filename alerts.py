@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import html
+import re
 from datetime import datetime
 from telegram import Bot
 from telegram.constants import ParseMode
@@ -42,24 +43,32 @@ def send_daily_summary(date: str = None, names: dict = None):
     asyncio.run(_send_message("\n".join(lines)))
 
 def send_social_pulse(date_str: str, trending_funds: list[dict]):
-    """Sosyal medya ve yatırımcı trendlerini raporlar."""
+    """Sosyal medya ve yatırımcı trendlerini HTML temasına göre raporlar."""
     lines = [
-        f"🔥 <b>SOSYAL MEDYA & TRENDLER</b>",
-        f"📅 {date_str}",
-        f"━━━━━━━━━━━━━━━━━━━━━━━━"
+        "🟢 <b>SOSYAL MEDYA &amp; TRENDLER</b>",
+        "🏆 <b>TOP 10 FON TRENDİ</b>",
+        "━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"📅 <code>{date_str}</code> · ⚡ <code>TEFAS</code> · 📊 <code>TREND</code>",
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
     ]
     
     if not trending_funds:
         lines.append("<i>Şu an sosyal medyada ve yatırımcı akışında anormal bir hareketlilik tespit edilmedi. Piyasa sakin.</i>")
     else:
-        lines.append("<i>Yatırımcı akışı ve sosyal medyadaki hareketliliğe göre öne çıkanlar:</i>\n")
-        for f in trending_funds:
-            code = f['code']
-            reason = html.escape(f['reason'])
-            lines.append(f"<b><a href='{TEFAS_URL}{code}'>{code}</a></b> - {f['growth']}")
-            lines.append(f"↳ {reason}\n")
+        for idx, f in enumerate(trending_funds, 1):
+            rank_str = f"<b>{idx:02d}.</b>"
+            code_str = f"<code>[{f['code']}]</code>"
+            pct_str = f"<b>{f['pct']}</b>"
+            stat_str = f"({f['stat']})" if f['stat'] else ""
+            
+            # Clean up duplicate newlines/whitespaces in reason
+            reason = html.escape(re.sub(r'\s+', ' ', f['reason']).strip())
+            
+            lines.append(f"{rank_str} {code_str}  🟢 {pct_str} {stat_str}")
+            lines.append(f"↳ <i>{reason}</i>\n")
         
-    lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("⚠️ <i>Yatırım tavsiyesi değildir · Geçmiş getiri garanti oluşturmaz</i>")
     asyncio.run(_send_message("\n".join(lines)))
 
 def send_periodic_summary(date_str: str, periodic_results: dict):
