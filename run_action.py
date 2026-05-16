@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+import asyncio
 import pandas as pd
 import sqlite3
 import requests
@@ -174,20 +175,20 @@ def run_once():
     
     if found_date:
         anomalies = detect_anomalies(found_date)
-        send_anomaly_alerts(anomalies, found_date)
+        asyncio.run(send_anomaly_alerts(anomalies, found_date))
         
         logger.info("Sosyal medya ve haber trendleri analiz ediliyor...")
         df_today = c.fetch(start=found_date, end=found_date, kind="YAT")
         names_dict = dict(zip(df_today['fund_code'], df_today['fund_name'])) if df_today is not None else {}
         
         trends = detect_social_trends(found_date, names_dict)
-        send_social_pulse(found_date, trends)
+        asyncio.run(send_social_pulse(found_date, trends))
         
-        send_daily_summary(found_date, names_dict)
+        asyncio.run(send_daily_summary(found_date, names_dict))
         
         periodic_results = calculate_periodic_top20(found_date, c)
         if periodic_results:
-            send_periodic_summary(found_date, periodic_results)
+            asyncio.run(send_periodic_summary(found_date, periodic_results))
 
 if __name__ == "__main__":
     run_once()
