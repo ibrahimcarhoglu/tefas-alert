@@ -43,20 +43,21 @@ def send_daily_summary(date: str = None, names: dict = None):
 
 def send_social_pulse(date_str: str, trending_funds: list[dict]):
     """Sosyal medya ve yatırımcı trendlerini raporlar."""
-    if not trending_funds: return
-    
     lines = [
         f"🔥 <b>SOSYAL MEDYA & TRENDLER</b>",
         f"📅 {date_str}",
-        f"━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"<i>Yatırımcı akışı ve sosyal medyadaki hareketliliğe göre öne çıkanlar:</i>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━"
     ]
     
-    for f in trending_funds:
-        code = f['code']
-        reason = html.escape(f['reason'])
-        lines.append(f"<b><a href='{TEFAS_URL}{code}'>{code}</a></b> - {f['growth']}")
-        lines.append(f"↳ {reason}\n")
+    if not trending_funds:
+        lines.append("<i>Şu an sosyal medyada ve yatırımcı akışında anormal bir hareketlilik tespit edilmedi. Piyasa sakin.</i>")
+    else:
+        lines.append("<i>Yatırımcı akışı ve sosyal medyadaki hareketliliğe göre öne çıkanlar:</i>\n")
+        for f in trending_funds:
+            code = f['code']
+            reason = html.escape(f['reason'])
+            lines.append(f"<b><a href='{TEFAS_URL}{code}'>{code}</a></b> - {f['growth']}")
+            lines.append(f"↳ {reason}\n")
         
     lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━")
     asyncio.run(_send_message("\n".join(lines)))
