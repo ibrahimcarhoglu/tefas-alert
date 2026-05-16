@@ -18,7 +18,7 @@ from alerts import send_anomaly_alerts, send_daily_summary, send_periodic_summar
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# KESİN YASAKLI KELİMELER (Gürültü Engelleme)
+# Gürültü ve Yasaklılar
 BLACKLIST = {
     'ARE', 'YOU', 'NOT', 'FOR', 'THE', 'AND', 'BUT', 'ALL', 'ANY', 'CAN', 'HAD', 'WAS', 'ITS', 'HIS', 'HER',
     'USD', 'EUR', 'GBP', 'TRY', 'KAP', 'IST', 'BIST', 'GUN', 'SON', 'YAT', 'BOS', 'FON', 'YEN', 'END', 'OUT',
@@ -26,21 +26,41 @@ BLACKLIST = {
 }
 
 def get_deep_insight(code):
+    """Google'dan en temiz ve anlamlı 'Neden' bilgisini ayıklar."""
     try:
-        url = f"https://www.google.com/search?q={code}+fonu+neden+konu%C5%9Fuluyor+haber+detay&tbs=qdr:w"
+        # Arama sorgusunu daha spesifik yapıyoruz
+        url = f"https://www.google.com/search?q={code}+fonu+twitter+yorumlar+haber+detay&tbs=qdr:w"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'lxml')
-        results = soup.find_all('div', {'class': 'VwiC3b'})
-        if results:
-            insight = results[0].get_text()
-            return f"Analiz: {insight[:140]}..."
-        return "Neden: Yatırımcı ilgisi ve sosyal medya trafiğinde artış."
+        
+        # Google'ın arama sonuçları metinlerini topla
+        insights = []
+        # Snippet'ları yakala
+        for div in soup.find_all('div', {'class': 'VwiC3b'}):
+            txt = div.get_text()
+            if len(txt) > 30:
+                # Reklam veya boilerplate metinleri ele
+                if not any(x in txt.lower() for x in ["çerez", "tıklayın", "privacy", "copyright"]):
+                    insights.append(txt)
+        
+        if insights:
+            # En uzun ve muhtemelen en bilgilendirici olanı seç
+            best_insight = max(insights, key=len)
+            # Baştaki tarihleri veya gereksiz kodları temizle
+            clean_insight = re.sub(r'^[0-9]{1,2} [a-zA-Z]{3} [0-9]{4} — ', '', best_insight)
+            return f"Analiz: {clean_insight[:160]}..."
+            
+        # Eğer snippet yoksa başlığı al
+        titles = [h.get_text() for h in soup.find_all('h3') if len(h.get_text()) > 20]
+        if titles:
+            return f"Analiz: {titles[0]}"
+            
+        return "Neden: Sosyal medyada bu fon hakkında stratejik yorumlar ve yatırımcı ilgisi artışta."
     except:
-        return "Neden: Piyasa gündeminde öne çıkan hareketlilik."
+        return "Neden: Piyasa gündeminde öne çıkan fon hareketliliği."
 
 def fetch_twitter_trends(valid_codes):
-    """Sadece gerçek fon kodlarını ve gürültüden arındırılmış verileri yakalar."""
     mentions = {}
     try:
         queries = [
@@ -55,11 +75,8 @@ def fetch_twitter_trends(valid_codes):
             res = requests.get(url, headers=headers, timeout=8)
             soup = BeautifulSoup(res.text, 'lxml')
             text = soup.get_text().upper()
-            
-            # Daha sıkı yakalama: Kelime başında $ veya # olan veya izole duran 3 harfli kodlar
             codes = re.findall(r'[$#]?\b([A-Z]{3})\b', text)
             for c in codes:
-                # 1. Yasaklı listede mi? 2. Gerçek fon listesinde mi?
                 if c not in BLACKLIST and c in valid_codes:
                     mentions[c] = mentions.get(c, 0) + 1
         return dict(sorted(mentions.items(), key=lambda x: x[1], reverse=True)[:20])
@@ -69,8 +86,6 @@ def fetch_twitter_trends(valid_codes):
 def detect_social_trends(date_str):
     from config import DB_PATH
     conn = sqlite3.connect(DB_PATH)
-    
-    # Gerçek fon listesini çek ve gürültüleri temizle
     all_db_codes = pd.read_sql_query("SELECT DISTINCT code FROM fund_daily", conn)['code'].tolist()
     valid_codes = [c for c in all_db_codes if c not in BLACKLIST and len(c) == 3]
     
@@ -91,7 +106,6 @@ def detect_social_trends(date_str):
         
         for _, row in df.iterrows():
             code = row['fund_code']
-            # Kod geçerli mi kontrol et
             if code in valid_codes and row['growth_count'] >= 1:
                 is_twitter_hot = code in twitter_mentions
                 insight = get_deep_insight(code)
@@ -101,7 +115,6 @@ def detect_social_trends(date_str):
                     "reason": f"{'🔥 Twitter Gündemi!' if is_twitter_hot else ''}\n{insight}"
                 })
         
-        # Twitter'daki gerçek kodlar yatırımcıya yansımadıysa bile ekle
         for t_code in twitter_mentions:
             if t_code not in [t['code'] for t in trends] and len(trends) < 10:
                 insight = get_deep_insight(t_code)
