@@ -19,36 +19,30 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 logger = logging.getLogger(__name__)
 
 def get_deep_insight(code):
-    """Google'daki haber snippet'larından derin analiz (Neden?) çıkarır."""
     try:
         url = f"https://www.google.com/search?q={code}+fonu+neden+konu%C5%9Fuluyor+haber+detay&tbs=qdr:w"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'lxml')
-        
-        # Haber başlıklarını ve altındaki kısa açıklamaları tara
-        results = soup.find_all('div', {'class': 'VwiC3b'}) # Google snippet class'ı
+        results = soup.find_all('div', {'class': 'VwiC3b'})
         if results:
             insight = results[0].get_text()
-            return f"Neden Gündemde? {insight[:140]}..."
-        
-        # Başlıklardan dene
+            return f"Analiz: {insight[:140]}..."
         titles = soup.find_all('h3')
         if titles:
-            return f"Neden Gündemde? {titles[0].get_text()}"
-            
-        return "Neden: Yatırımcı ilgisi ve sosyal medya trafiğinde ani artış."
+            return f"Analiz: {titles[0].get_text()}"
+        return "Neden: Yatırımcı ilgisi ve sosyal medya trafiğinde artış."
     except:
         return "Neden: Piyasa gündeminde öne çıkan hareketlilik."
 
-def fetch_twitter_trends():
-    """Objektif olarak en çok konuşulan kodları yakalar."""
+def fetch_twitter_trends(valid_codes):
+    """Sadece gerçek fon kodlarını (valid_codes) içeren trendleri yakalar."""
     mentions = {}
     try:
         queries = [
             'site:twitter.com "TEFAS" "fonu" gündem',
             'site:twitter.com "$*" yatırım fonu',
-            'site:twitter.com "en çok kazandıran fonlar" twitter'
+            'site:twitter.com "en çok konuşulan fonlar" twitter'
         ]
         headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         
@@ -59,7 +53,8 @@ def fetch_twitter_trends():
             text = soup.get_text().upper()
             codes = re.findall(r'\b([A-Z]{3})\b', text)
             for c in codes:
-                if c not in ['USD', 'EUR', 'KAP', 'IST', 'BIST', 'TRY', 'YAT', 'SON', 'GUN', 'BOS', 'FON']:
+                # KRİTİK FİLTRE: Sadece veritabanında olan gerçek kodları kabul et
+                if c in valid_codes:
                     mentions[c] = mentions.get(c, 0) + 1
         return dict(sorted(mentions.items(), key=lambda x: x[1], reverse=True)[:20])
     except:
@@ -68,6 +63,10 @@ def fetch_twitter_trends():
 def detect_social_trends(date_str):
     from config import DB_PATH
     conn = sqlite3.connect(DB_PATH)
+    
+    # Tüm geçerli fon kodlarını veritabanından çek (Gürültü engelleme için)
+    valid_codes = pd.read_sql_query("SELECT DISTINCT code FROM fund_daily", conn)['code'].tolist()
+    
     query = """
     SELECT t1.code as fund_code, t1.num_investors as today, t2.num_investors as yesterday, 
            (CAST(t1.num_investors AS FLOAT) - t2.num_investors) / NULLIF(t2.num_investors, 0) * 100 as growth_pct,
@@ -81,7 +80,7 @@ def detect_social_trends(date_str):
     trends = []
     try:
         df = pd.read_sql_query(query, conn, params=(date_str, date_str))
-        twitter_mentions = fetch_twitter_trends()
+        twitter_mentions = fetch_twitter_trends(valid_codes)
         
         for _, row in df.iterrows():
             code = row['fund_code']
@@ -90,11 +89,11 @@ def detect_social_trends(date_str):
                 insight = get_deep_insight(code)
                 trends.append({
                     "code": code,
-                    "growth": f"+%{row['growth_pct']:.2f} (+{int(row['growth_count'])} yeni yatırımcı)",
+                    "growth": f"+%{row['growth_pct']:.2f} (+{int(row['growth_count'])} kişi)",
                     "reason": f"{'🔥 Twitter Gündemi!' if is_twitter_hot else ''}\n{insight}"
                 })
         
-        # Twitter'daki sıcak kodlar yatırımcıya yansımadıysa bile ekle
+        # Twitter'daki gerçek kodlar yatırımcıya yansımadıysa bile ekle
         for t_code in twitter_mentions:
             if t_code not in [t['code'] for t in trends] and len(trends) < 10:
                 insight = get_deep_insight(t_code)
@@ -105,7 +104,6 @@ def detect_social_trends(date_str):
                 })
                     
         conn.close()
-        # Twitter'da olanları başa çek
         return sorted(trends, key=lambda x: "🔥" in x['reason'], reverse=True)[:10]
     except Exception as e:
         logger.error("Trend analizi hatası: %s", e)
