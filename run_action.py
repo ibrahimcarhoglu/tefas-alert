@@ -80,22 +80,13 @@ def fetch_twitter_trends(valid_codes):
         print("Uyarı: SERPER_API_KEY bulunamadı (.env dosyasına ekleyin). X taraması atlanıyor.")
         return mentions
 
-    # X'teki finansal toplulukların (Fintwit) kullandığı spesifik kalıplar
+    # Tek seferde (kredi harcamasını minimize ederek) Fintwit'in kalbini vuran optimize sorgular
     queries = [
-        # 1. Genel TEFAS ve Portföy Paylaşımları
-        'site:twitter.com "tefas" ("fon sepeti" OR "fon portföyüm" OR "portföy dağılımı")',
+        # 1. Ana Damar: İçinde TEFAS veya Fon kelimesi geçen ve doğrudan Cashtag ($) içeren tweetler
+        'site:twitter.com ("tefas" OR "yatırım fonu" OR "fonlar") "$"',
         
-        # 2. Alım/Satım ve Aksiyon Bildirimleri (Yatırımcı Psikolojisi)
-        'site:twitter.com "fon" ("aldım" OR "ekleme yaptım" OR "maliyetlendim" OR "giriş yaptım")',
-        
-        # 3. Performans ve Getiri Odaklı Tartışmalar
-        'site:twitter.com ("en çok kazandıran" OR "getiri şampiyonu" OR "yüksek getiri") "fon"',
-        
-        # 4. Analiz, Öneri ve İncelemeler
-        'site:twitter.com ("fon analizi" OR "fon incelemesi" OR "fon önerisi" OR "dikkat çeken fonlar")',
-        
-        # 5. Spesifik Fon Türlerine İlgi (Dönemsel rotasyonları yakalamak için)
-        'site:twitter.com ("serbest fon" OR "hisse senedi fonu" OR "para piyasası fonu" OR "kıymetli madenler fonu")'
+        # 2. Aksiyon ve Popülerlik: Yatırımcıların alım/satım veya "en iyi" muhabbeti döndürdüğü tweetler
+        'site:twitter.com "fon" ("aldım" OR "portföy" OR "kazandıran" OR "gündem")'
     ]
     
     url = "https://google.serper.dev/search"
@@ -109,7 +100,6 @@ def fetch_twitter_trends(valid_codes):
             payload = json.dumps({
               "q": q,
               "tbs": "qdr:d",
-              "num": 50,
               "gl": "tr",
               "hl": "tr"
             })
