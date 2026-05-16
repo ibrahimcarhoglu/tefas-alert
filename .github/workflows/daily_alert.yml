@@ -16,7 +16,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Tüm geçmişi çek ki rebase yapabilsin
+          fetch-depth: 0 # Rebase için tüm geçmiş lazım
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -43,7 +43,10 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add data/tefas.db
-          # Çakışmaları önlemek için önce pull yap
-          git pull --rebase origin main
-          git commit -m "chore: update database [skip ci]" || echo "No changes to commit"
-          git push
+          # Değişiklik varsa commit yap, yoksa hata verme
+          git commit -m "chore: update database [skip ci]" || exit 0
+          
+          # Push denemesi ve çakışma durumunda rebase/retry
+          for i in {1..5}; do
+            git push origin main && break || (git pull --rebase origin main && sleep 5)
+          done
