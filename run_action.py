@@ -86,7 +86,10 @@ def fetch_twitter_trends(valid_codes):
         'site:twitter.com ("tefas" OR "yatırım fonu" OR "fonlar") "$"',
         
         # 2. Aksiyon ve Popülerlik: Yatırımcıların alım/satım veya "en iyi" muhabbeti döndürdüğü tweetler
-        'site:twitter.com "fon" ("aldım" OR "portföy" OR "kazandıran" OR "gündem")'
+        'site:twitter.com "fon" ("aldım" OR "portföy" OR "kazandıran" OR "gündem")',
+        
+        # 3. Kanaat Önderleri (Seed Accounts): Önemli finans/fon analiz hesaplarının ve onlara verilen yanıtların radarına giren fonlar
+        'site:twitter.com ("Fon_Eko" OR "FonTahmin" OR "FonetikFunds" OR "TEFASGovTr" OR "tefasvebefasfon" OR "Fintablescom" OR "getmidas") "$"'
     ]
     
     url = "https://google.serper.dev/search"
