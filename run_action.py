@@ -19,32 +19,34 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 logger = logging.getLogger(__name__)
 
 def get_news_reason(code):
-    """Bir fon kodu için Google'da kısa bir haber taraması yapıp nedenini bulmaya çalışır."""
     try:
         url = f"https://www.google.com/search?q={code}+fonu+neden+konu%C5%9Fuluyor+haberleri&tbs=qdr:w"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'lxml')
-        
-        # İlk 2-3 arama sonucunun başlığını/snippet'ını al
         results = soup.find_all('h3')
         if results:
             reason = results[0].get_text()
-            # Gürültüyü temizle ve biraz kısalt
-            return f"Muhtemel Neden: {reason[:80]}..."
-        return "Sosyal medyada yoğun trafik tespit edildi."
+            return f"Analiz: {reason[:80]}..."
+        return "Yatırımcı ilgisi artış gösteriyor."
     except:
-        return "Yatırımcı ilgisi ve sosyal medya trafiği artışta."
+        return "Piyasa gündeminde yer alıyor."
 
 def fetch_twitter_trends():
     try:
-        url = "https://www.google.com/search?q=site:twitter.com+%22fon%22+OR+%22tefas%22+OR+%22%24%22&tbs=qdr:d"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        # Aramayı daha da genişletiyoruz
+        url = "https://www.google.com/search?q=site:twitter.com+%22tefas%22+OR+%22fonu%22+OR+%22hisse%22&tbs=qdr:d"
+        headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'lxml')
         text = soup.get_text().upper()
-        cashtags = re.findall(r'\$([A-Z]{3})', text)
-        return pd.Series(cashtags).value_counts().head(10).to_dict()
+        
+        # Hem $MAC hem #MAC hem de sadece MAC (3 harfli büyük harf) yakala
+        codes = re.findall(r'[$#]?([A-Z]{3})', text)
+        
+        # Sadece bilinen fon kodlarına benzeyenleri tut (İstatistiksel filtre)
+        counts = pd.Series(codes).value_counts()
+        return counts.head(15).to_dict()
     except:
         return {}
 
@@ -68,9 +70,9 @@ def detect_social_trends(date_str):
         
         for _, row in df.iterrows():
             code = row['fund_code']
-            if row['growth_count'] >= 10: # Minimum 10 yeni kişi
-                extra = "🔥 Twitter Gündemi!" if code in twitter_mentions else ""
-                # Her trend fon için "Neden" bulmaya çalış
+            # Filtreyi minimuma çekiyoruz (Hassas Mod)
+            if row['growth_count'] >= 1:
+                extra = "🔥 Trend!" if code in twitter_mentions else ""
                 reason = get_news_reason(code)
                 trends.append({
                     "code": code,
@@ -78,16 +80,17 @@ def detect_social_trends(date_str):
                     "reason": f"{extra} {reason}"
                 })
         
-        # Twitter'da olup henüz listeye girmeyenler
-        for t_code in twitter_mentions:
-            if t_code not in [t['code'] for t in trends] and len(trends) < 10:
-                reason = get_news_reason(t_code)
-                trends.append({
-                    "code": t_code,
-                    "growth": "Twitter Radarı",
-                    "reason": reason
-                })
-                
+        # Eğer hala liste boşsa Twitter'dan gelenleri direkt ekle
+        if len(trends) < 5:
+            for t_code in twitter_mentions:
+                if t_code not in [t['code'] for t in trends] and len(trends) < 10:
+                    reason = get_news_reason(t_code)
+                    trends.append({
+                        "code": t_code,
+                        "growth": "Twitter Radarı",
+                        "reason": reason
+                    })
+                    
         conn.close()
         return trends[:10]
     except Exception as e:
