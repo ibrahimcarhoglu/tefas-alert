@@ -89,7 +89,10 @@ def fetch_twitter_trends(valid_codes):
         'site:twitter.com "fon" ("aldım" OR "portföy" OR "kazandıran" OR "gündem")',
         
         # 3. Kanaat Önderleri (Seed Accounts): Önemli finans/fon analiz hesaplarının ve onlara verilen yanıtların radarına giren fonlar
-        'site:twitter.com ("Fon_Eko" OR "FonTahmin" OR "FonetikFunds" OR "TEFASGovTr" OR "tefasvebefasfon" OR "Fintablescom" OR "getmidas") "$"'
+        'site:twitter.com ("Fon_Eko" OR "FonTahmin" OR "FonetikFunds" OR "TEFASGovTr" OR "tefasvebefasfon" OR "Fintablescom" OR "getmidas") "$"',
+        
+        # 4. Tematik Odak: Para girişi, yatırımcı sayısı ve fon büyüklüğü gibi yapısal verileri tartışan tweetler
+        'site:x.com ("para girişi" OR "yatırımcı sayısı" OR "fon büyüklüğü")'
     ]
     
     url = "https://google.serper.dev/search"
@@ -102,7 +105,7 @@ def fetch_twitter_trends(valid_codes):
         for q in queries:
             payload = json.dumps({
               "q": q,
-              "tbs": "qdr:d",
+              "tbs": "qdr:d7",
               "gl": "tr",
               "hl": "tr"
             })
