@@ -18,35 +18,39 @@ from alerts import send_anomaly_alerts, send_daily_summary, send_periodic_summar
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-def fetch_twitter_trends():
-    """Twitter fısıltılarını Google üzerinden yakalamaya çalışır."""
+def get_news_reason(code):
+    """Bir fon kodu için Google'da kısa bir haber taraması yapıp nedenini bulmaya çalışır."""
     try:
-        # Daha geniş bir arama terimi
-        url = "https://www.google.com/search?q=site:twitter.com+%22fon%22+OR+%22tefas%22+OR+%22portf%C3%B6y%22&tbs=qdr:d"
-        headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-        
+        url = f"https://www.google.com/search?q={code}+fonu+neden+konu%C5%9Fuluyor+haberleri&tbs=qdr:w"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
-        if "google.com/sorry" in response.url:
-            logger.warning("Google tarama engeline (Captcha) takıldı.")
-            return {}
-            
+        soup = BeautifulSoup(response.text, 'lxml')
+        
+        # İlk 2-3 arama sonucunun başlığını/snippet'ını al
+        results = soup.find_all('h3')
+        if results:
+            reason = results[0].get_text()
+            # Gürültüyü temizle ve biraz kısalt
+            return f"Muhtemel Neden: {reason[:80]}..."
+        return "Sosyal medyada yoğun trafik tespit edildi."
+    except:
+        return "Yatırımcı ilgisi ve sosyal medya trafiği artışta."
+
+def fetch_twitter_trends():
+    try:
+        url = "https://www.google.com/search?q=site:twitter.com+%22fon%22+OR+%22tefas%22+OR+%22%24%22&tbs=qdr:d"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'lxml')
         text = soup.get_text().upper()
-        
-        # 3 harfli büyük harf gruplarını yakala (Örn: MAC, TCD, AFT)
-        potential_codes = re.findall(r'\b([A-Z]{3})\b', text)
-        
-        # Bilinen bazı fon kodlarını filtrele (Gürültüyü azaltmak için)
-        counts = pd.Series(potential_codes).value_counts()
-        return counts.head(10).to_dict()
-    except Exception as e:
-        logger.error("Twitter tarama hatası: %s", e)
+        cashtags = re.findall(r'\$([A-Z]{3})', text)
+        return pd.Series(cashtags).value_counts().head(10).to_dict()
+    except:
         return {}
 
 def detect_social_trends(date_str):
     from config import DB_PATH
     conn = sqlite3.connect(DB_PATH)
-    
     query = """
     SELECT t1.code as fund_code, t1.num_investors as today, t2.num_investors as yesterday, 
            (CAST(t1.num_investors AS FLOAT) - t2.num_investors) / NULLIF(t2.num_investors, 0) * 100 as growth_pct,
@@ -64,25 +68,26 @@ def detect_social_trends(date_str):
         
         for _, row in df.iterrows():
             code = row['fund_code']
-            # Filtreyi 5 yeni yatırımcıya indiriyorum (Haftasonu/sakin günler için)
-            if row['growth_count'] >= 5:
-                extra = "🔥 Sosyal medyada adı geçiyor!" if code in twitter_mentions else ""
+            if row['growth_count'] >= 10: # Minimum 10 yeni kişi
+                extra = "🔥 Twitter Gündemi!" if code in twitter_mentions else ""
+                # Her trend fon için "Neden" bulmaya çalış
+                reason = get_news_reason(code)
                 trends.append({
                     "code": code,
                     "growth": f"+%{row['growth_pct']:.2f} (+{int(row['growth_count'])} kişi)",
-                    "reason": f"Yatırımcı akışı pozitif. {extra}"
+                    "reason": f"{extra} {reason}"
                 })
         
-        # Eğer hiç trend yoksa ve twitter'da bir şeyler varsa onları ekle
-        if not trends:
-            for t_code, count in twitter_mentions.items():
-                if len(trends) < 5:
-                    trends.append({
-                        "code": t_code,
-                        "growth": "Sosyal Medya Radarı",
-                        "reason": f"Twitter'da bu fon hakkında konuşmalar tespit edildi (Hacim: {count})."
-                    })
-                    
+        # Twitter'da olup henüz listeye girmeyenler
+        for t_code in twitter_mentions:
+            if t_code not in [t['code'] for t in trends] and len(trends) < 10:
+                reason = get_news_reason(t_code)
+                trends.append({
+                    "code": t_code,
+                    "growth": "Twitter Radarı",
+                    "reason": reason
+                })
+                
         conn.close()
         return trends[:10]
     except Exception as e:
@@ -125,17 +130,13 @@ def run_once():
             break
     
     if found_date:
-        # 1. Anomaliler
         anomalies = detect_anomalies(found_date)
         send_anomaly_alerts(anomalies, found_date)
         
-        # 2. Sosyal Trendler
-        logger.info("Sosyal medya ve yatırımcı trendleri analiz ediliyor...")
+        logger.info("Sosyal medya ve haber trendleri analiz ediliyor...")
         trends = detect_social_trends(found_date)
-        # TREND OLMASA BİLE ÇAĞIR (Sakin gün raporu için)
         send_social_pulse(found_date, trends)
         
-        # 3. Günlük ve Periyodik Raporlar
         df_today = c.fetch(start=found_date, end=found_date, kind="YAT")
         names_dict = dict(zip(df_today['fund_code'], df_today['fund_name'])) if df_today is not None else {}
         send_daily_summary(found_date, names_dict)
