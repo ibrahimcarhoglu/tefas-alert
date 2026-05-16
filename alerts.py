@@ -57,7 +57,7 @@ def send_social_pulse(date_str: str, trending_funds: list[dict]):
     else:
         for idx, f in enumerate(trending_funds, 1):
             rank_str = f"<b>{idx:02d}.</b>"
-            code_str = f"<a href='{TEFAS_URL}{f['code']}'><code>[{f['code']}]</code></a>"
+            code_str = f"<a href='{TEFAS_URL}{f['code']}'><b>{f['code']}</b></a>"
             pct_str = f"<b>{f['pct']}</b>"
             stat_str = f"({f['stat']})" if f['stat'] else ""
             
@@ -93,7 +93,7 @@ def send_periodic_summary(date_str: str, periodic_results: dict):
             emoji = "🔼" if pct >= 0 else "🔽"
             
             rank_str = f"<b>{idx:02d}.</b>"
-            code_str = f"<a href='{TEFAS_URL}{code}'><code>[{code}]</code></a>"
+            code_str = f"<a href='{TEFAS_URL}{code}'><b>{code}</b></a>"
             
             lines.append(f"{rank_str} {code_str}  {emoji} <b>{pct_str}</b>")
             lines.append(f"↳ <i>{name}</i>\n")
