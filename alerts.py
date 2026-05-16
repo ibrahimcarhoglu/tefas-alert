@@ -2,7 +2,6 @@ import asyncio
 import logging
 import html
 import re
-from datetime import datetime
 from telegram import Bot
 from telegram.constants import ParseMode
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
@@ -17,104 +16,124 @@ async def _send_message(text: str):
         return
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     try:
-        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        await bot.send_message(
+            chat_id=TELEGRAM_CHAT_ID, 
+            text=text, 
+            parse_mode=ParseMode.HTML, 
+            disable_web_page_preview=True
+        )
     except Exception as e:
         logger.error("Mesaj gönderilemedi: %s", e)
 
-def send_daily_summary(date: str = None, names: dict = None):
+def _fmt_try(amount: float) -> str:
+    if abs(amount) >= 1_000_000_000:
+        return f"{amount/1_000_000_000:+.2f}B ₺"
+    elif abs(amount) >= 1_000_000:
+        return f"{amount/1_000_000:+.2f}M ₺"
+    return f"{amount:+.2f} ₺"
+
+async def send_daily_summary(date: str = None, names: dict = None):
     data = get_dashboard_data()
-    if not data: return
+    if not data: 
+        return
     total_inflow = data.get("total_inflow", 0)
     top_inflows = data.get("top_inflows", [])[:5]
     names = names or {}
     
     lines = [
-        f"📊 <b>GÜNLÜK ÖZET</b> — {date}",
-        f"━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"📈 Toplam Giriş: <b>{_fmt_try(total_inflow)}</b>",
-        "\n💰 <b>En Çok Para Girişi:</b>"
+        f"📊 <b>TEFAS GÜNLÜK ÖZET REPORT</b>",
+        f"📅 <code>{date}</code>",
+        "────────────────────────",
+        f"📈 <b>Toplam Net Giriş:</b> <code>{_fmt_try(total_inflow)}</code>",
+        "\n💰 <b>EN YÜKSEK PARA GİRİŞİ (TOP 5)</b>",
+        "────────────────────────"
     ]
-    for r in top_inflows:
-        code = r[0]
-        fname = html.escape(names.get(code, ""))
-        name_str = f"\n<pre>{fname[:25]}...</pre>" if fname else ""
-        lines.append(f"• <a href='{TEFAS_URL}{code}'><b>{code}</b></a>: {_fmt_try(r[1])}{name_str}")
     
-    asyncio.run(_send_message("\n".join(lines)))
+    medals = ["🥇", "🥈", "🥉", "🔹", "🔹"]
+    for idx, r in enumerate(top_inflows):
+        code = r[0]
+        fname = html.escape(names.get(code, "Bilinmeyen Fon"))
+        name_str = fname[:30] + "..." if len(fname) > 30 else fname
+        
+        medal = medals[idx] if idx < len(medals) else "🔹"
+        
+        # Kod ve Para miktarını net ayırıp alt satıra ağaç çizgisiyle fon adını koyuyoruz
+        lines.append(f"{medal} <a href='{TEFAS_URL}{code}'><b>{code}</b></a> ➜ <code>{_fmt_try(r[1])}</code>")
+        lines.append(f"    └── <i>{name_str}</i>\n")
+    
+    lines.append("────────────────────────")
+    lines.append("⚠️ <i>Yatırım tavsiyesi değildir.</i>")
+    await _send_message("\n".join(lines))
 
-def send_social_pulse(date_str: str, trending_funds: list[dict]):
-    """Sosyal medya ve yatırımcı trendlerini HTML temasına göre raporlar."""
+async def send_social_pulse(date_str: str, trending_funds: list[dict]):
     lines = [
-        "🟢 <b>SOSYAL MEDYA &amp; TRENDLER</b>",
-        "🏆 <b>TOP 10 FON TRENDİ</b>",
-        "━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"📅 <code>{date_str}</code> · ⚡ <code>TEFAS</code> · 📊 <code>TREND</code>",
-        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🔥 <b>SOSYAL MEDYA &amp; YATIRIMCI TRENDLERİ</b>",
+        f"📅 <code>{date_str}</code> · ⚡ <code>TEFAS Pulse</code>",
+        "────────────────────────\n"
     ]
     
     if not trending_funds:
-        lines.append("<i>Şu an sosyal medyada ve yatırımcı akışında anormal bir hareketlilik tespit edilmedi. Piyasa sakin.</i>")
+        lines.append("▫️ <i>Piyasada anormal bir hareketlilik tespit edilmedi.</i>")
     else:
         for idx, f in enumerate(trending_funds, 1):
-            rank_str = f"<b>{idx:02d}.</b>"
             code_str = f"<a href='{TEFAS_URL}{f['code']}'><b>{f['code']}</b></a>"
-            pct_str = f"<b>{f['pct']}</b>"
-            stat_str = f"({f['stat']})" if f['stat'] else ""
-            
-            # Clean up duplicate newlines/whitespaces in reason
+            pct_str = f"<code>{f['pct']}</code>"
+            stat_str = f" ({f['stat']})" if f['stat'] else ""
             reason = html.escape(re.sub(r'\s+', ' ', f['reason']).strip())
             
-            lines.append(f"{rank_str} {code_str}  🟢 {pct_str} {stat_str}")
-            lines.append(f"↳ <i>{reason}</i>\n")
+            lines.append(f"<b>{idx:02d}.</b> {code_str} ➜ {pct_str}{stat_str}")
+            lines.append(f"    💬 <i>{reason}</i>\n")
         
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("⚠️ <i>Yatırım tavsiyesi değildir · Geçmiş getiri garanti oluşturmaz</i>")
-    asyncio.run(_send_message("\n".join(lines)))
+    lines.append("────────────────────────")
+    lines.append("⚠️ <i>Geçmiş performans gelecek getirinin garantisi değildir.</i>")
+    await _send_message("\n".join(lines))
 
-def send_periodic_summary(date_str: str, periodic_results: dict):
-    """TOP 15 Periyodik Getiri Listesini zengin tasarımla raporlar."""
+async def send_periodic_summary(date_str: str, periodic_results: dict):
     for label, df in periodic_results.items():
         lines = [
-            "⚡ <b>PERİYODİK ANALİZ</b>",
-            f"🚀 <b>TOP 15 GETİRİ LİSTESİ ({label.upper()})</b>",
-            "━━━━━━━━━━━━━━━━━━━━━━━━",
-            f"📅 <code>{date_str}</code> · 📈 <code>{label} Vade</code> · 🏛️ <code>TEFAS</code>",
-            "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚡ <b>PERİYODİK PERFORMANS ANALİZİ</b>",
+            f"🚀 <b>TOP 15 LİSTESİ ({label.upper()} VADE)</b>",
+            "────────────────────────",
+            f"📅 <code>{date_str}</code> · 📈 <code>TEFAS Verileri</code>",
+            "────────────────────────\n"
         ]
         
         for idx, (_, row) in enumerate(df.iterrows(), 1):
             code = row['fund_code']
             fname = row.get('fund_name', 'Bilinmeyen Fon')
             safe_name = html.escape(str(fname))
-            name = safe_name[:40] + "..." if len(safe_name) > 40 else safe_name
+            name = safe_name[:32] + "..." if len(safe_name) > 32 else safe_name
             
             pct = row['pct_change']
-            pct_str = f"+%{pct:.2f}" if pct >= 0 else f"-%{abs(pct):.2f}"
-            emoji = "🔼" if pct >= 0 else "🔽"
+            # Değişime göre renkli emoji belirleme
+            emoji = "🔺" if pct >= 0 else "🔻"
+            pct_str = f"<code>{pct:+.2f}%</code>"
             
-            rank_str = f"<b>{idx:02d}.</b>"
             code_str = f"<a href='{TEFAS_URL}{code}'><b>{code}</b></a>"
             
-            lines.append(f"{rank_str} {code_str}  {emoji} <b>{pct_str}</b>")
-            lines.append(f"↳ <i>{name}</i>\n")
+            lines.append(f"<b>{idx:02d}.</b> {code_str}  {emoji} {pct_str}")
+            lines.append(f"    └── <i>{name}</i>\n")
             
-        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
-        lines.append("⚠️ <i>Yatırım tavsiyesi değildir · Geçmiş getiri garanti oluşturmaz</i>")
-        asyncio.run(_send_message("\n".join(lines)))
+        lines.append("────────────────────────")
+        lines.append("⚠️ <i>Yatırım tavsiyesi değildir.</i>")
+        await _send_message("\n".join(lines))
 
-def send_anomaly_alerts(anomalies: list[dict], date: str):
-    if not anomalies: return
-    lines = [f"🚨 <b>ANOMALİ ALARMI</b> — {date}", "━━━━━━━━━━━━━━━━━━━━━━━━"]
+async def send_anomaly_alerts(anomalies: list[dict], date: str):
+    if not anomalies: 
+        return
+    lines = [
+        "🚨 <b>HASSAS ANOMALİ ALARMI</b>",
+        f"📅 <code>{date}</code>",
+        "────────────────────────"
+    ]
     for a in anomalies[:15]:
         code = a['code']
+        severity = a.get('severity', '🟡')
         safe_label = html.escape(a['label'])
         safe_detail = html.escape(a['detail'])
-        lines.append(f"\n{a.get('severity', '🟡')} <a href='{TEFAS_URL}{code}'><b>{code}</b></a>\n  ↳ {safe_label}: {safe_detail}")
-    asyncio.run(_send_message("\n".join(lines)))
-
-def _fmt_try(amount: float) -> str:
-    if abs(amount) >= 1_000_000_000:
-        return f"{amount/1_000_000_000:+.2f}B ₺"
-    elif abs(amount) >= 1_000_000:
-        return f"{amount/1_000:+.2f}M ₺"
-    return f"{amount:+.2f} ₺"
+        
+        lines.append(f"\n{severity} <a href='{TEFAS_URL}{code}'><b>{code}</b></a> ➜ <b>{safe_label}</b>")
+        lines.append(f"    └── <i>{safe_detail}</i>")
+        
+    lines.append("\n────────────────────────")
+    await _send_message("\n".join(lines))
