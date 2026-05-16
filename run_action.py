@@ -33,23 +33,25 @@ def fetch_twitter_trends():
         cashtags = re.findall(r'\$([A-Z]{3})', text)
         
         counts = pd.Series(cashtags).value_counts()
-        return counts.head(5).to_dict()
+        return counts.head(10).to_dict()
     except Exception as e:
         logger.error("Twitter trend tarama hatası: %s", e)
         return {}
 
 def detect_social_trends(date_str):
     """Matematiksel veri + Twitter fısıltılarını birleştirir."""
-    conn = sqlite3.connect("data/tefas.db")
+    # DB_PATH'i config'den çek
+    from config import DB_PATH
+    conn = sqlite3.connect(DB_PATH)
     
-    # 1. Yatırımcı Akışı Analizi
+    # fund_daily tablosunu kullan, code sütununu kontrol et
     query = """
-    SELECT t1.fund_code, t1.num_investors as today, t2.num_investors as yesterday, 
+    SELECT t1.code as fund_code, t1.num_investors as today, t2.num_investors as yesterday, 
            (CAST(t1.num_investors AS FLOAT) - t2.num_investors) / NULLIF(t2.num_investors, 0) * 100 as growth_pct,
            t1.num_investors - t2.num_investors as growth_count
-    FROM daily_stats t1
-    JOIN daily_stats t2 ON t1.fund_code = t2.fund_code
-    WHERE t1.date = ? AND t2.date = (SELECT MAX(date) FROM daily_stats WHERE date < ?)
+    FROM fund_daily t1
+    JOIN fund_daily t2 ON t1.code = t2.code
+    WHERE t1.date = ? AND t2.date = (SELECT MAX(date) FROM fund_daily WHERE date < ?)
     ORDER BY growth_pct DESC
     LIMIT 20
     """
@@ -57,14 +59,12 @@ def detect_social_trends(date_str):
     try:
         df = pd.read_sql_query(query, conn, params=(date_str, date_str))
         
-        # 2. Twitter'daki Canlı Mentions
         twitter_mentions = fetch_twitter_trends()
         
         for _, row in df.iterrows():
             code = row['fund_code']
             score = row['growth_pct']
             
-            # Eğer fon Twitter'da da geçiyorsa "Sıcak Trend" yap
             extra = ""
             if code in twitter_mentions:
                 extra = "🔥 Twitter'da çok konuşuluyor!"
@@ -72,17 +72,17 @@ def detect_social_trends(date_str):
             if row['growth_count'] > 30: # Filtre
                 trends.append({
                     "code": code,
-                    "growth": f"+%{score:.2f} ({int(row['growth_count'])} yeni yatırımcı)",
-                    "reason": f"Yatırımcı girişi ivmelendi. {extra}"
+                    "growth": f"+%{score:.2f} ({int(row['growth_count'])} yeni kişi)",
+                    "reason": f"Yatırımcı girişi hızlandı. {extra}"
                 })
         
-        # Sadece Twitter'da olup henüz fona girişi yansımayanları da ekle
+        # Twitter'da çok geçenleri de listeye ekle
         for t_code in twitter_mentions:
             if t_code not in [t['code'] for t in trends]:
                 trends.append({
                     "code": t_code,
                     "growth": "Sosyal Medya Radarı",
-                    "reason": "Twitter'da (X) hakkında konuşulma trafiği arttı. Yakında fona girişler artabilir."
+                    "reason": "Twitter'da (X) hakkında konuşulma trafiği arttı. İlgi yüksek."
                 })
                 
         conn.close()
