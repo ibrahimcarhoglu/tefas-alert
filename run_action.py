@@ -19,11 +19,12 @@ from alerts import send_anomaly_alerts, send_daily_summary, send_periodic_summar
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# Gürültü ve Yasaklılar
-BLACKLIST = {
-    'ARE', 'YOU', 'NOT', 'FOR', 'THE', 'AND', 'BUT', 'ALL', 'ANY', 'CAN', 'HAD', 'WAS', 'ITS', 'HIS', 'HER',
-    'USD', 'EUR', 'GBP', 'TRY', 'KAP', 'IST', 'BIST', 'GUN', 'SON', 'YAT', 'BOS', 'FON', 'YEN', 'END', 'OUT',
-    'GET', 'SET', 'FOR', 'WEB', 'COM', 'NET', 'ORG', 'HTTP', 'HTTPS', 'WWW', 'NEW', 'TOP', 'MAX', 'MIN'
+# Tarayıcı gibi görünmek için genişletilmiş header seti
+HTTP_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'tr,en-US;q=0.7,en;q=0.3',
+    'Referer': 'https://www.google.com/'
 }
 
 def get_deep_insight(code, name=""):
@@ -64,35 +65,67 @@ def get_deep_insight(code, name=""):
     return "Analiz: Sosyal medyadaki stratejik yatırımcı ilgisi ve artan fon hareketliliği."
 
 def fetch_twitter_trends(valid_codes):
+    """
+    X (Twitter) üzerindeki finansal cashtag ($) ve hashtag (#) yoğunluğunu 
+    Google Real-Time indeksleri üzerinden doğrudan geçerli fon kodlarıyla eşleştirir.
+    """
     mentions = {}
+    if not valid_codes:
+        return mentions
+
+    # X'teki finansal toplulukların (Fintwit) kullandığı kalıplar
+    queries = [
+        'site:twitter.com "fonu" OR "portföy" "tefas" -filter:links',
+        'site:twitter.com "en iyi fonlar" OR "kazandıran fonlar"',
+        'site:twitter.com/search "yatırım fonu"'
+    ]
+    
     try:
-        queries = [
-            'site:twitter.com "TEFAS" "fonu" gündem',
-            'site:twitter.com "$*" yatırım fonu',
-            'site:twitter.com "en çok konuşulan fonlar" twitter'
-        ]
-        headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-        
         for q in queries:
-            url = f"https://www.google.com/search?q={q}&tbs=qdr:d"
-            res = requests.get(url, headers=headers, timeout=8)
+            # Son 24 saatteki X indekslerini yakalamak için qdr:d kullanımı kritik
+            url = f"https://www.google.com/search?q={q}&tbs=qdr:d&num=50"
+            res = requests.get(url, headers=HTTP_HEADERS, timeout=10)
+            
+            if res.status_code != 200:
+                continue
+                
             soup = BeautifulSoup(res.text, 'lxml')
-            text = soup.get_text().upper()
-            codes = re.findall(r'[$#]?\b([A-Z]{3})\b', text)
-            for c in codes:
-                if c not in BLACKLIST and c in valid_codes:
-                    mentions[c] = mentions.get(c, 0) + 1
+            
+            # Sadece arama sonuçlarının snippet (özet) metinlerini tara
+            search_snippets = soup.find_all(['div', 'span'], class_=['VwiC3b', 'yXM6Id', 'MUFIg'])
+            text_pool = " ".join([node.get_text().upper() for node in search_snippets]) if search_snippets else soup.get_text().upper()
+            
+            # Finansal Cashtag ($) ve Hashtag (#) bazlı fon yakalama: $XYZ veya #XYZ
+            # Sadece 3 harfli büyük harf kombinasyonlarını arar
+            potential_codes = re.findall(r'[\$\#\b]([A-Z]{3})\b', text_pool)
+            
+            for c in potential_codes:
+                # Blacklist kontrolü kaldırıldı, doğrudan geçerli TEFAS kod listesiyle doğrulanıyor
+                if c in valid_codes:
+                    # Cashtag ile ($) doğrudan hedef gösterildiyse ilgiyi 2 kat say
+                    weight = 2 if f"${c}" in text_pool else 1
+                    mentions[c] = mentions.get(c, 0) + weight
+                    
+        # En çok konuşulan ilk 20 fonu sırala
         return dict(sorted(mentions.items(), key=lambda x: x[1], reverse=True)[:20])
-    except:
+    except Exception as e:
+        print(f"X Trend tarama hatası: {e}")
         return {}
 
 def detect_social_trends(date_str, names_dict=None):
+    """
+    TEFAS Yatırımcı Değişimi ile X (Twitter) verilerini korele ederek 
+    hibrit bir 'Trend Skor' üretir.
+    """
     from config import DB_PATH
     names_dict = names_dict or {}
+    
     conn = sqlite3.connect(DB_PATH)
     all_db_codes = pd.read_sql_query("SELECT DISTINCT code FROM fund_daily", conn)['code'].tolist()
-    valid_codes = [c for c in all_db_codes if c not in BLACKLIST and len(c) == 3]
+    # Sadece 3 harfli fon kodlarını geçerli kabul et (Blacklist filtresi kaldırıldı)
+    valid_codes = [c for c in all_db_codes if len(c) == 3]
     
+    # Son gün ile bir önceki günün yatırımcı farkı
     query = """
     SELECT t1.code as fund_code, t1.num_investors as today, t2.num_investors as yesterday, 
            (CAST(t1.num_investors AS FLOAT) - t2.num_investors) / NULLIF(t2.num_investors, 0) * 100 as growth_pct,
@@ -100,40 +133,58 @@ def detect_social_trends(date_str, names_dict=None):
     FROM fund_daily t1
     JOIN fund_daily t2 ON t1.code = t2.code
     WHERE t1.date = ? AND t2.date = (SELECT MAX(date) FROM fund_daily WHERE date < ?)
-    ORDER BY growth_pct DESC
-    LIMIT 40
+    ORDER BY growth_count DESC
+    LIMIT 50
     """
+    
     trends = []
     try:
         df = pd.read_sql_query(query, conn, params=(date_str, date_str))
+        
+        # X (Twitter) verilerini çek
         twitter_mentions = fetch_twitter_trends(valid_codes)
         
+        # 1. Aşama: Hem veritabanında büyüyen hem de X'te konuşulanlar (Hibrit Skorlama)
         for _, row in df.iterrows():
             code = row['fund_code']
-            if code in valid_codes and row['growth_count'] >= 1:
-                is_twitter_hot = code in twitter_mentions
-                name = names_dict.get(code, "")
-                insight = get_deep_insight(code, name)
-                trends.append({
-                    "code": code,
-                    "pct": f"+%{row['growth_pct']:.2f}",
-                    "stat": f"+{int(row['growth_count'])} kişi",
-                    "reason": f"🔥 {insight}" if is_twitter_hot else insight
-                })
+            if code not in valid_codes or row['growth_count'] < 1:
+                continue
+                
+            tw_count = twitter_mentions.get(code, 0)
+            is_twitter_hot = tw_count > 0
+            
+            # Hibrit Trend Puanı Hesaplama
+            social_score = (row['growth_pct'] * 1.5) + (tw_count * 2.0)
+            
+            name = names_dict.get(code, "")
+            insight = get_deep_insight(code, name)
+            
+            trends.append({
+                "code": code,
+                "pct": f"+%{row['growth_pct']:.2f}",
+                "stat": f"+{int(row['growth_count'])} kişi (X Skoru: {tw_count})",
+                "reason": f"🔥 [Fintwit Gündemi] {insight}" if is_twitter_hot else insight,
+                "score": social_score
+            })
         
-        for t_code in twitter_mentions:
-            if t_code not in [t['code'] for t in trends] and len(trends) < 10:
+        # 2. Aşama: TEFAS'ta henüz veri yansımamış ama X'te fırtınalar koparanlar
+        for t_code, tw_count in twitter_mentions.items():
+            if t_code not in [t['code'] for t in trends] and len(trends) < 15:
                 name = names_dict.get(t_code, "")
                 insight = get_deep_insight(t_code, name)
                 trends.append({
                     "code": t_code,
                     "pct": "🚀",
-                    "stat": "Sosyal Medya İvmesi",
-                    "reason": insight
+                    "stat": f"X / Fintwit Yoğun İlgi (Skor: {tw_count})",
+                    "reason": f"⚡ {insight}",
+                    "score": tw_count * 3.0
                 })
                     
         conn.close()
-        return sorted(trends, key=lambda x: "🔥" in x['reason'] or "🚀" in x['pct'], reverse=True)[:10]
+        
+        # Trendleri ürettikleri toplam skora göre büyükten küçüğe sırala (İlk 10)
+        return sorted(trends, key=lambda x: x['score'], reverse=True)[:10]
+        
     except Exception as e:
         logger.error("Trend analizi hatası: %s", e)
         return []
