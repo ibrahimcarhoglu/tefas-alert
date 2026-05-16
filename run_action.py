@@ -18,6 +18,13 @@ from alerts import send_anomaly_alerts, send_daily_summary, send_periodic_summar
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+# KESİN YASAKLI KELİMELER (Gürültü Engelleme)
+BLACKLIST = {
+    'ARE', 'YOU', 'NOT', 'FOR', 'THE', 'AND', 'BUT', 'ALL', 'ANY', 'CAN', 'HAD', 'WAS', 'ITS', 'HIS', 'HER',
+    'USD', 'EUR', 'GBP', 'TRY', 'KAP', 'IST', 'BIST', 'GUN', 'SON', 'YAT', 'BOS', 'FON', 'YEN', 'END', 'OUT',
+    'GET', 'SET', 'FOR', 'WEB', 'COM', 'NET', 'ORG', 'HTTP', 'HTTPS', 'WWW', 'NEW', 'TOP', 'MAX', 'MIN'
+}
+
 def get_deep_insight(code):
     try:
         url = f"https://www.google.com/search?q={code}+fonu+neden+konu%C5%9Fuluyor+haber+detay&tbs=qdr:w"
@@ -28,15 +35,12 @@ def get_deep_insight(code):
         if results:
             insight = results[0].get_text()
             return f"Analiz: {insight[:140]}..."
-        titles = soup.find_all('h3')
-        if titles:
-            return f"Analiz: {titles[0].get_text()}"
         return "Neden: Yatırımcı ilgisi ve sosyal medya trafiğinde artış."
     except:
         return "Neden: Piyasa gündeminde öne çıkan hareketlilik."
 
 def fetch_twitter_trends(valid_codes):
-    """Sadece gerçek fon kodlarını (valid_codes) içeren trendleri yakalar."""
+    """Sadece gerçek fon kodlarını ve gürültüden arındırılmış verileri yakalar."""
     mentions = {}
     try:
         queries = [
@@ -51,10 +55,12 @@ def fetch_twitter_trends(valid_codes):
             res = requests.get(url, headers=headers, timeout=8)
             soup = BeautifulSoup(res.text, 'lxml')
             text = soup.get_text().upper()
-            codes = re.findall(r'\b([A-Z]{3})\b', text)
+            
+            # Daha sıkı yakalama: Kelime başında $ veya # olan veya izole duran 3 harfli kodlar
+            codes = re.findall(r'[$#]?\b([A-Z]{3})\b', text)
             for c in codes:
-                # KRİTİK FİLTRE: Sadece veritabanında olan gerçek kodları kabul et
-                if c in valid_codes:
+                # 1. Yasaklı listede mi? 2. Gerçek fon listesinde mi?
+                if c not in BLACKLIST and c in valid_codes:
                     mentions[c] = mentions.get(c, 0) + 1
         return dict(sorted(mentions.items(), key=lambda x: x[1], reverse=True)[:20])
     except:
@@ -64,8 +70,9 @@ def detect_social_trends(date_str):
     from config import DB_PATH
     conn = sqlite3.connect(DB_PATH)
     
-    # Tüm geçerli fon kodlarını veritabanından çek (Gürültü engelleme için)
-    valid_codes = pd.read_sql_query("SELECT DISTINCT code FROM fund_daily", conn)['code'].tolist()
+    # Gerçek fon listesini çek ve gürültüleri temizle
+    all_db_codes = pd.read_sql_query("SELECT DISTINCT code FROM fund_daily", conn)['code'].tolist()
+    valid_codes = [c for c in all_db_codes if c not in BLACKLIST and len(c) == 3]
     
     query = """
     SELECT t1.code as fund_code, t1.num_investors as today, t2.num_investors as yesterday, 
@@ -84,12 +91,13 @@ def detect_social_trends(date_str):
         
         for _, row in df.iterrows():
             code = row['fund_code']
-            if row['growth_count'] >= 1:
+            # Kod geçerli mi kontrol et
+            if code in valid_codes and row['growth_count'] >= 1:
                 is_twitter_hot = code in twitter_mentions
                 insight = get_deep_insight(code)
                 trends.append({
                     "code": code,
-                    "growth": f"+%{row['growth_pct']:.2f} (+{int(row['growth_count'])} kişi)",
+                    "growth": f"+%{row['growth_pct']:.2f} (+{int(row['growth_count'])} yeni yatırımcı)",
                     "reason": f"{'🔥 Twitter Gündemi!' if is_twitter_hot else ''}\n{insight}"
                 })
         
