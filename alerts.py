@@ -9,15 +9,7 @@ from database import get_dashboard_data
 
 logger = logging.getLogger(__name__)
 
-# TEFAS Fon Analiz Linki Sabiti
 TEFAS_URL = "https://www.tefas.gov.tr/FonAnaliz.aspx?FonKod="
-
-def _fmt_try(amount: float) -> str:
-    if abs(amount) >= 1_000_000_000:
-        return f"{amount/1_000_000_000:+.2f}B ₺"
-    elif abs(amount) >= 1_000_000:
-        return f"{amount/1_000:+.2f}M ₺"
-    return f"{amount:+.2f} ₺"
 
 async def _send_message(text: str):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not text:
@@ -37,7 +29,6 @@ def send_daily_summary(date: str = None, names: dict = None):
     
     lines = [
         f"📊 <b>GÜNLÜK ÖZET</b> — {date}",
-        f"🌐 <a href='https://www.tefas.gov.tr'>TEFAS Platformu Aktif</a>",
         f"━━━━━━━━━━━━━━━━━━━━━━━━",
         f"📈 Toplam Giriş: <b>{_fmt_try(total_inflow)}</b>",
         "\n💰 <b>En Çok Para Girişi:</b>"
@@ -46,9 +37,28 @@ def send_daily_summary(date: str = None, names: dict = None):
         code = r[0]
         fname = html.escape(names.get(code, ""))
         name_str = f"\n<pre>{fname[:25]}...</pre>" if fname else ""
-        # Kod üzerine TEFAS linki ekle
         lines.append(f"• <a href='{TEFAS_URL}{code}'><b>{code}</b></a>: {_fmt_try(r[1])}{name_str}")
     
+    asyncio.run(_send_message("\n".join(lines)))
+
+def send_social_pulse(date_str: str, trending_funds: list[dict]):
+    """Sosyal medya ve yatırımcı trendlerini raporlar."""
+    if not trending_funds: return
+    
+    lines = [
+        f"🔥 <b>SOSYAL MEDYA & TRENDLER</b>",
+        f"📅 {date_str}",
+        f"━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"<i>Yatırımcı akışı ve sosyal medyadaki hareketliliğe göre öne çıkanlar:</i>\n"
+    ]
+    
+    for f in trending_funds:
+        code = f['code']
+        reason = html.escape(f['reason'])
+        lines.append(f"<b><a href='{TEFAS_URL}{code}'>{code}</a></b> - {f['growth']}")
+        lines.append(f"↳ {reason}\n")
+        
+    lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━")
     asyncio.run(_send_message("\n".join(lines)))
 
 def send_periodic_summary(date_str: str, periodic_results: dict):
@@ -62,7 +72,6 @@ def send_periodic_summary(date_str: str, periodic_results: dict):
             fname = row.get('fund_name', 'Bilinmeyen Fon')
             safe_name = html.escape(str(fname))
             name = safe_name[:35] + "..." if len(safe_name) > 35 else safe_name
-            # Kod üzerine TEFAS linki ekle
             lines.append(f"<a href='{TEFAS_URL}{code}'><b>{code}</b></a> - %{row['pct_change']:>5.2f}\n<pre>{name}</pre>")
         lines.append(f"────────────────────────")
         asyncio.run(_send_message("\n".join(lines)))
@@ -74,6 +83,12 @@ def send_anomaly_alerts(anomalies: list[dict], date: str):
         code = a['code']
         safe_label = html.escape(a['label'])
         safe_detail = html.escape(a['detail'])
-        # Kod üzerine TEFAS linki ekle
         lines.append(f"\n{a.get('severity', '🟡')} <a href='{TEFAS_URL}{code}'><b>{code}</b></a>\n  ↳ {safe_label}: {safe_detail}")
     asyncio.run(_send_message("\n".join(lines)))
+
+def _fmt_try(amount: float) -> str:
+    if abs(amount) >= 1_000_000_000:
+        return f"{amount/1_000_000_000:+.2f}B ₺"
+    elif abs(amount) >= 1_000_000:
+        return f"{amount/1_000:+.2f}M ₺"
+    return f"{amount:+.2f} ₺"
