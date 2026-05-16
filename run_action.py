@@ -87,6 +87,7 @@ def fetch_twitter_trends(valid_codes):
 
 def detect_social_trends(date_str, names_dict=None):
     from config import DB_PATH
+    names_dict = names_dict or {}
     conn = sqlite3.connect(DB_PATH)
     all_db_codes = pd.read_sql_query("SELECT DISTINCT code FROM fund_daily", conn)['code'].tolist()
     valid_codes = [c for c in all_db_codes if c not in BLACKLIST and len(c) == 3]
@@ -176,11 +177,12 @@ def run_once():
         send_anomaly_alerts(anomalies, found_date)
         
         logger.info("Sosyal medya ve haber trendleri analiz ediliyor...")
-        trends = detect_social_trends(found_date)
-        send_social_pulse(found_date, trends)
-        
         df_today = c.fetch(start=found_date, end=found_date, kind="YAT")
         names_dict = dict(zip(df_today['fund_code'], df_today['fund_name'])) if df_today is not None else {}
+        
+        trends = detect_social_trends(found_date, names_dict)
+        send_social_pulse(found_date, trends)
+        
         send_daily_summary(found_date, names_dict)
         
         periodic_results = calculate_periodic_top20(found_date, c)
