@@ -73,11 +73,22 @@ def fetch_twitter_trends(valid_codes):
     if not valid_codes:
         return mentions
 
-    # X'teki finansal toplulukların (Fintwit) kullandığı kalıplar
+    # X'teki finansal toplulukların (Fintwit) kullandığı spesifik kalıplar
     queries = [
-        'site:twitter.com "fonu" OR "portföy" "tefas" -filter:links',
-        'site:twitter.com "en iyi fonlar" OR "kazandıran fonlar"',
-        'site:twitter.com/search "yatırım fonu"'
+        # 1. Genel TEFAS ve Portföy Paylaşımları
+        'site:twitter.com "tefas" ("fon sepeti" OR "fon portföyüm" OR "portföy dağılımı")',
+        
+        # 2. Alım/Satım ve Aksiyon Bildirimleri (Yatırımcı Psikolojisi)
+        'site:twitter.com "fon" ("aldım" OR "ekleme yaptım" OR "maliyetlendim" OR "giriş yaptım")',
+        
+        # 3. Performans ve Getiri Odaklı Tartışmalar
+        'site:twitter.com ("en çok kazandıran" OR "getiri şampiyonu" OR "yüksek getiri") "fon"',
+        
+        # 4. Analiz, Öneri ve İncelemeler
+        'site:twitter.com ("fon analizi" OR "fon incelemesi" OR "fon önerisi" OR "dikkat çeken fonlar")',
+        
+        # 5. Spesifik Fon Türlerine İlgi (Dönemsel rotasyonları yakalamak için)
+        'site:twitter.com ("serbest fon" OR "hisse senedi fonu" OR "para piyasası fonu" OR "kıymetli madenler fonu")'
     ]
     
     try:
