@@ -26,13 +26,10 @@ async def _send_message(text: str):
         await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text, parse_mode=ParseMode.HTML)
 
 def send_daily_summary(date: str = None):
-    """Günlük özet raporu."""
     data = get_dashboard_data()
     if not data: return
-    
     total_inflow = data.get("total_inflow", 0)
     top_inflows = data.get("top_inflows", [])[:5]
-    
     lines = [
         f"📊 <b>GÜNLÜK ÖZET</b> — {date}",
         f"━━━━━━━━━━━━━━━━━━━━━━━━",
@@ -41,11 +38,10 @@ def send_daily_summary(date: str = None):
     ]
     for r in top_inflows:
         lines.append(f"  • {r[0]}: {_fmt_try(r[1])}")
-    
     asyncio.run(_send_message("\n".join(lines)))
 
 def send_periodic_summary(date_str: str, periodic_results: dict):
-    """Periyotlara göre Top 20 listesi."""
+    """Periyotlara göre Top 20 listesi (İsimler dahil)."""
     lines = [
         f"🚀 <b>TOP 20 PERİYODİK GETİRİ ANALİZİ</b>",
         f"📅 Tarih: {date_str}",
@@ -53,18 +49,18 @@ def send_periodic_summary(date_str: str, periodic_results: dict):
     ]
     
     for label, df in periodic_results.items():
-        lines.append(f"\n<b>{label}:</b>")
-        lines.append(f"<code>{'Kod':<6} {'Değişim':<10}</code>")
+        lines.append(f"\n🔥 <b>{label}:</b>")
         for _, row in df.iterrows():
-            lines.append(f"<code>{row['fund_code']:<6} %{row['pct_change']:>7.2f}</code>")
+            # Fon ismini biraz kısalt (max 30 karakter)
+            name = row['fund_name'][:30] + "..." if len(row['fund_name']) > 30 else row['fund_name']
+            lines.append(f"<b>{row['fund_code']}</b> - %{row['pct_change']:>5.2f}\n<pre>{name}</pre>")
         lines.append(f"────────────────────────")
 
     asyncio.run(_send_message("\n".join(lines)))
 
 def send_anomaly_alerts(anomalies: list[dict], date: str):
-    """Anomali bildirimleri."""
     if not anomalies: return
     lines = [f"🚨 <b>ANOMALİ ALARMI</b> — {date}", "━━━━━━━━━━━━━━━━━━━━━━━━"]
-    for a in anomalies[:15]: # Limitli
+    for a in anomalies[:15]:
         lines.append(f"\n{a.get('severity', '🟡')} <b>{a['code']}</b>\n  ↳ {a['label']}: {a['detail']}")
     asyncio.run(_send_message("\n".join(lines)))

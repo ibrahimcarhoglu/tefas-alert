@@ -17,24 +17,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 logger = logging.getLogger(__name__)
 
 def calculate_periodic_top20(latest_date_str, c):
-    """3g, 1h, 2h, 1a, 7h periyotları için Top 20 hesaplar."""
+    """3g, 1h, 2h, 1a, 7h periyotları için Top 20 hesaplar (İsimler dahil)."""
     latest_date = datetime.strptime(latest_date_str, "%Y-%m-%d")
     df_latest = c.fetch(start=latest_date_str, end=latest_date_str, kind="YAT")
     if df_latest is None or df_latest.empty: return {}
-    df_latest = df_latest[['fund_code', 'price']].rename(columns={'price': 'p_lat'})
+    
+    # fund_name sütununu da alıyoruz
+    df_latest = df_latest[['fund_code', 'fund_name', 'price']].rename(columns={'price': 'p_lat'})
     
     periods = {"3 Gün": 3, "1 Hafta": 7, "2 Hafta": 14, "1 Ay": 30, "7 Hafta": 49}
     results = {}
 
     for label, days in periods.items():
         target = latest_date - timedelta(days=days)
-        for i in range(5): # Geriye dönük 5 gün dene (haftasonu/tatil için)
+        for i in range(5):
             check = (target - timedelta(days=i)).strftime("%Y-%m-%d")
             df_prev = c.fetch(start=check, end=check, kind="YAT")
             if df_prev is not None and not df_prev.empty:
                 df_prev = df_prev[['fund_code', 'price']].rename(columns={'price': 'p_pre'})
                 df = pd.merge(df_latest, df_prev, on='fund_code')
                 df['pct_change'] = (df['p_lat'] - df['p_pre']) / df['p_pre'] * 100
+                # En iyi 20'yi al
                 results[label] = df.sort_values(by='pct_change', ascending=False).head(20)
                 break
     return results
@@ -52,13 +55,11 @@ def run_once():
             break
     
     if found_date:
-        # 1. Anomali ve Günlük Özet
         anomalies = detect_anomalies(found_date)
         send_anomaly_alerts(anomalies, found_date)
         send_daily_summary(found_date)
         
-        # 2. Periyodik Top 20 (Yeni İstek)
-        logger.info("Periyodik analiz yapılıyor...")
+        logger.info("Periyodik analiz yapılıyor (İsimlerle birlikte)...")
         periodic_results = calculate_periodic_top20(found_date, c)
         if periodic_results:
             send_periodic_summary(found_date, periodic_results)
