@@ -1,0 +1,43 @@
+name: Daily TEFAS Alert
+
+on:
+  schedule:
+    # Her gün Türkiye saatiyle 10:30 (UTC 07:30)
+    - cron: '30 7 * * *'
+  workflow_dispatch: # Manuel tetikleme için
+
+jobs:
+  run-alert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Daily Alert Job
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          Z_SCORE_THRESHOLD: 2.5
+          DAILY_RETURN_THRESHOLD: 5.0
+          FUND_TYPE: YAT
+        run: |
+          # Tek seferlik çalıştırma için scheduler.py'daki run_daily_job mantığını kullanan bir script çalıştıracağız
+          python run_action.py
+
+      - name: Commit and Push Database Changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add data/tefas.db
+          git commit -m "chore: update database [skip ci]" || echo "No changes to commit"
+          git push

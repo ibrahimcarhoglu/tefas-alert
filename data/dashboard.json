@@ -1,0 +1,223 @@
+{
+  "last_date": "2026-05-15",
+  "total_funds": 2001,
+  "total_inflow": "75.15B",
+  "total_outflow": "-61.70B",
+  "top_inflows": [
+    {
+      "code": "UCP",
+      "net_flow": "8.51B",
+      "pct_change": 0.11,
+      "num_investors": 28,
+      "market_cap": "22.64B"
+    },
+    {
+      "code": "YVD",
+      "net_flow": "5.63B",
+      "pct_change": 0.1,
+      "num_investors": 81868,
+      "market_cap": "67.35B"
+    },
+    {
+      "code": "GAL",
+      "net_flow": "4.95B",
+      "pct_change": 0.11,
+      "num_investors": 57303,
+      "market_cap": "132.57B"
+    },
+    {
+      "code": "GTL",
+      "net_flow": "4.73B",
+      "pct_change": 0.11,
+      "num_investors": 326144,
+      "market_cap": "152.26B"
+    },
+    {
+      "code": "KNI",
+      "net_flow": "4.44B",
+      "pct_change": 0.1,
+      "num_investors": 412,
+      "market_cap": "16.09B"
+    },
+    {
+      "code": "KHP",
+      "net_flow": "4.43B",
+      "pct_change": 0.14,
+      "num_investors": 1272,
+      "market_cap": "20.96B"
+    },
+    {
+      "code": "DLY",
+      "net_flow": "3.70B",
+      "pct_change": 0.11,
+      "num_investors": 313031,
+      "market_cap": "87.90B"
+    },
+    {
+      "code": "BGP",
+      "net_flow": "3.14B",
+      "pct_change": 0.11,
+      "num_investors": 30694,
+      "market_cap": "63.23B"
+    },
+    {
+      "code": "FI5",
+      "net_flow": "2.61B",
+      "pct_change": 0.1,
+      "num_investors": 52098,
+      "market_cap": "96.64B"
+    },
+    {
+      "code": "ZBJ",
+      "net_flow": "2.44B",
+      "pct_change": 0.11,
+      "num_investors": 19680,
+      "market_cap": "50.97B"
+    }
+  ],
+  "top_outflows": [
+    {
+      "code": "FNN",
+      "net_flow": "0",
+      "pct_change": 0,
+      "num_investors": 1,
+      "market_cap": "0.00"
+    },
+    {
+      "code": "GKE",
+      "net_flow": "0",
+      "pct_change": 0,
+      "num_investors": 0,
+      "market_cap": "0.01"
+    },
+    {
+      "code": "GKO",
+      "net_flow": "0",
+      "pct_change": 0,
+      "num_investors": 0,
+      "market_cap": "0.01"
+    },
+    {
+      "code": "GMV",
+      "net_flow": "0",
+      "pct_change": 0,
+      "num_investors": 0,
+      "market_cap": "0.01"
+    },
+    {
+      "code": "GSU",
+      "net_flow": "0",
+      "pct_change": 0,
+      "num_investors": 0,
+      "market_cap": "0.01"
+    },
+    {
+      "code": "PRZ",
+      "net_flow": "0",
+      "pct_change": 0,
+      "num_investors": 0,
+      "market_cap": "5.46K"
+    },
+    {
+      "code": "RDS",
+      "net_flow": "0",
+      "pct_change": 0,
+      "num_investors": 0,
+      "market_cap": "44.33"
+    },
+    {
+      "code": "ROS",
+      "net_flow": "0",
+      "pct_change": 0,
+      "num_investors": 0,
+      "market_cap": "0.01"
+    },
+    {
+      "code": "RPE",
+      "net_flow": "0",
+      "pct_change": 0,
+      "num_investors": 0,
+      "market_cap": "23.66"
+    },
+    {
+      "code": "TMH",
+      "net_flow": "0",
+      "pct_change": 0,
+      "num_investors": 12,
+      "market_cap": "0.00"
+    }
+  ],
+  "top_returns": [
+    {
+      "code": "HGJ",
+      "pct_change": 47.36,
+      "net_flow": "-0.03",
+      "num_investors": 12,
+      "market_cap": "24.53M"
+    },
+    {
+      "code": "SIS",
+      "pct_change": 12.59,
+      "net_flow": "-4.82",
+      "num_investors": 11,
+      "market_cap": "70.05M"
+    },
+    {
+      "code": "PDS",
+      "pct_change": 12.51,
+      "net_flow": "2.27",
+      "num_investors": 42,
+      "market_cap": "3.46M"
+    },
+    {
+      "code": "PYD",
+      "pct_change": 10.01,
+      "net_flow": "-18.10",
+      "num_investors": 45,
+      "market_cap": "151.37M"
+    },
+    {
+      "code": "BHN",
+      "pct_change": 10.0,
+      "net_flow": "44.85",
+      "num_investors": 42,
+      "market_cap": "973.73M"
+    },
+    {
+      "code": "SYF",
+      "pct_change": 6.97,
+      "net_flow": "1.83",
+      "num_investors": 6,
+      "market_cap": "2.17B"
+    },
+    {
+      "code": "RAI",
+      "pct_change": 6.84,
+      "net_flow": "612.43",
+      "num_investors": 1,
+      "market_cap": "5.02B"
+    },
+    {
+      "code": "CBO",
+      "pct_change": 6.59,
+      "net_flow": "-1.23",
+      "num_investors": 3,
+      "market_cap": "2.01B"
+    },
+    {
+      "code": "HVC",
+      "pct_change": 6.35,
+      "net_flow": "-1.60",
+      "num_investors": 17,
+      "market_cap": "76.06M"
+    },
+    {
+      "code": "IBR",
+      "pct_change": 6.09,
+      "net_flow": "-5.93K",
+      "num_investors": 71,
+      "market_cap": "1.74B"
+    }
+  ],
+  "recent_alerts": []
+}

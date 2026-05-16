@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TEFAS Fon Alert Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: #1f2d45;
+    --accent: #3b82f6;
+    --green: #10b981;
+    --red: #ef4444;
+    --orange: #f59e0b;
+    --text: #e2e8f0;
+    --muted: #64748b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  header {
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 1.25rem 2rem;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header h1 { font-size: 1.4rem; font-weight: 700; background: linear-gradient(90deg, #60a5fa, #34d399); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  #last-update { font-size: 0.78rem; color: var(--muted); }
+
+  .container { max-width: 1400px; margin: 0 auto; padding: 1.5rem 2rem; }
+
+  /* Stat cards */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.2rem 1.5rem; transition: transform 0.2s;
+  }
+  .stat-card:hover { transform: translateY(-2px); }
+  .stat-card .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 0.5rem; }
+  .stat-card .value { font-size: 1.6rem; font-weight: 700; }
+  .stat-card .sub { font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem; }
+  .green { color: var(--green); }
+  .red { color: var(--red); }
+  .blue { color: var(--accent); }
+
+  /* Grid layout */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem; }
+  @media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+  /* Cards */
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  }
+  .card-header {
+    padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .card-header h2 { font-size: 0.9rem; font-weight: 600; }
+  .card-body { padding: 0.75rem; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th { padding: 0.6rem 0.75rem; text-align: left; color: var(--muted); font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }
+  td { padding: 0.65rem 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.03); }
+  .badge { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 999px; font-size: 0.7rem; font-weight: 600; }
+  .badge-green { background: rgba(16,185,129,0.15); color: var(--green); }
+  .badge-red { background: rgba(239,68,68,0.15); color: var(--red); }
+  .badge-orange { background: rgba(245,158,11,0.15); color: var(--orange); }
+  .code { font-family: monospace; font-weight: 700; font-size: 0.88rem; color: #93c5fd; }
+
+  /* Alert list */
+  .alert-item { padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 0.5rem; background: var(--surface2); }
+  .alert-item .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem; }
+  .alert-item .detail { font-size: 0.75rem; color: var(--muted); }
+
+  /* Load state */
+  #loading { text-align: center; padding: 4rem; color: var(--muted); font-size: 1rem; }
+  #error-state { display: none; text-align: center; padding: 3rem; color: var(--red); }
+
+  .pulse { animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  .refresh-btn {
+    background: var(--accent); color: white; border: none; padding: 0.5rem 1.1rem;
+    border-radius: 8px; cursor: pointer; font-size: 0.82rem; font-weight: 500;
+    transition: background 0.2s;
+  }
+  .refresh-btn:hover { background: #2563eb; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>📊 TEFAS Fon Alert Dashboard</h1>
+    <div id="last-update" class="pulse">Veri yükleniyor...</div>
+  </div>
+  <button class="refresh-btn" onclick="loadData()">🔄 Yenile</button>
+</header>
+
+<div class="container">
+  <div id="loading">⏳ data/dashboard.json yükleniyor...<br><small style="margin-top:0.5rem;display:block">Önce <code>python run.py --now</code> çalıştırın</small></div>
+  <div id="error-state">
+    ❌ Veri yüklenemedi.<br>
+    <small>Lütfen önce <code>python run.py --now</code> çalıştırın.</small>
+  </div>
+
+  <div id="dashboard" style="display:none">
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="label">📅 Son Veri</div>
+        <div class="value blue" id="s-date" style="font-size:1.1rem">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">🏦 Toplam Fon</div>
+        <div class="value blue" id="s-funds">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">💰 Toplam Giriş</div>
+        <div class="value green" id="s-inflow">—</div>
+        <div class="sub">₺ (tahmini)</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">🚪 Toplam Çıkış</div>
+        <div class="value red" id="s-outflow">—</div>
+        <div class="sub">₺ (tahmini)</div>
+      </div>
+    </div>
+
+    <!-- Top tables -->
+    <div class="grid-3">
+      <div class="card">
+        <div class="card-header"><span>💰</span><h2>En Fazla Para Girişi</h2></div>
+        <div class="card-body">
+          <table>
+            <thead><tr><th>Kod</th><th>Net Akış</th><th>Getiri</th></tr></thead>
+            <tbody id="tbl-inflow"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span>🚪</span><h2>En Fazla Para Çıkışı</h2></div>
+        <div class="card-body">
+          <table>
+            <thead><tr><th>Kod</th><th>Net Akış</th><th>Getiri</th></tr></thead>
+            <tbody id="tbl-outflow"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span>🚀</span><h2>En Yüksek Getiri</h2></div>
+        <div class="card-body">
+          <table>
+            <thead><tr><th>Kod</th><th>Getiri</th><th>Net Akış</th></tr></thead>
+            <tbody id="tbl-returns"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Alerts -->
+    <div class="card">
+      <div class="card-header"><span>🚨</span><h2>Son Anomali Alertleri</h2></div>
+      <div class="card-body" id="alerts-list">
+        <div style="color:var(--muted);text-align:center;padding:1.5rem;font-size:0.85rem">Henüz alert yok</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const ALERT_TYPE_LABELS = {
+  NET_FLOW_IN:    { emoji: '📈', label: 'Anormal Para Girişi',    cls: 'badge-green'  },
+  NET_FLOW_OUT:   { emoji: '📉', label: 'Anormal Para Çıkışı',   cls: 'badge-red'    },
+  HIGH_RETURN:    { emoji: '🚀', label: 'Yüksek Getiri',          cls: 'badge-green'  },
+  HIGH_LOSS:      { emoji: '⚠️', label: 'Yüksek Kayıp',           cls: 'badge-red'    },
+  INVESTOR_IN:    { emoji: '🧑‍🤝‍🧑', label: 'Yatırımcı Artışı',  cls: 'badge-green'  },
+  INVESTOR_OUT:   { emoji: '🚶', label: 'Yatırımcı Azalması',     cls: 'badge-orange' },
+};
+
+async function loadData() {
+  const loading = document.getElementById('loading');
+  const errEl   = document.getElementById('error-state');
+  const dash    = document.getElementById('dashboard');
+  loading.style.display = 'block';
+  errEl.style.display   = 'none';
+  dash.style.display    = 'none';
+
+  try {
+    const res = await fetch(`../data/dashboard.json?t=${Date.now()}`);
+    if (!res.ok) throw new Error('Dosya bulunamadı');
+    const d = await res.json();
+
+    // Stats
+    document.getElementById('s-date').textContent    = d.last_date || '—';
+    document.getElementById('s-funds').textContent   = d.total_funds || '—';
+    document.getElementById('s-inflow').textContent  = d.total_inflow || '0';
+    document.getElementById('s-outflow').textContent = d.total_outflow || '0';
+    document.getElementById('last-update').textContent = `Son güncelleme: ${new Date().toLocaleTimeString('tr-TR')}`;
+    document.getElementById('last-update').classList.remove('pulse');
+
+    // Inflow table
+    const tIn = document.getElementById('tbl-inflow');
+    tIn.innerHTML = (d.top_inflows || []).map(r => `
+      <tr>
+        <td><span class="code">${r.code}</span></td>
+        <td class="green">+${r.net_flow}</td>
+        <td><span class="badge ${r.pct_change >= 0 ? 'badge-green':'badge-red'}">${r.pct_change >= 0 ? '+':''}${r.pct_change}%</span></td>
+      </tr>`).join('');
+
+    // Outflow table
+    const tOut = document.getElementById('tbl-outflow');
+    tOut.innerHTML = (d.top_outflows || []).map(r => `
+      <tr>
+        <td><span class="code">${r.code}</span></td>
+        <td class="red">${r.net_flow}</td>
+        <td><span class="badge ${r.pct_change >= 0 ? 'badge-green':'badge-red'}">${r.pct_change >= 0 ? '+':''}${r.pct_change}%</span></td>
+      </tr>`).join('');
+
+    // Returns table
+    const tRet = document.getElementById('tbl-returns');
+    tRet.innerHTML = (d.top_returns || []).map(r => `
+      <tr>
+        <td><span class="code">${r.code}</span></td>
+        <td class="${r.pct_change >= 0 ? 'green':'red'}">${r.pct_change >= 0 ? '+':''}${r.pct_change}%</td>
+        <td>${r.net_flow}</td>
+      </tr>`).join('');
+
+    // Alerts
+    const alertsEl = document.getElementById('alerts-list');
+    if (d.recent_alerts && d.recent_alerts.length > 0) {
+      alertsEl.innerHTML = d.recent_alerts.map(a => {
+        const info = ALERT_TYPE_LABELS[a.type] || { emoji: '⚡', label: a.type, cls: 'badge-orange' };
+        return `
+          <div class="alert-item">
+            <div class="top">
+              <span>${info.emoji} <strong>${a.code}</strong> — <span class="badge ${info.cls}">${info.label}</span></span>
+              <span style="font-size:0.72rem;color:var(--muted)">${a.date}</span>
+            </div>
+            <div class="detail">Değer: ${a.value?.toFixed ? a.value.toFixed(2) : a.value} &nbsp;|&nbsp; Z-Score: ${a.z_score?.toFixed ? a.z_score.toFixed(2) : '—'}</div>
+          </div>`;
+      }).join('');
+    } else {
+      alertsEl.innerHTML = '<div style="color:var(--muted);text-align:center;padding:1.5rem;font-size:0.85rem">✅ Henüz anomali tespit edilmedi</div>';
+    }
+
+    loading.style.display = 'none';
+    dash.style.display    = 'block';
+
+  } catch (e) {
+    console.error(e);
+    loading.style.display = 'none';
+    errEl.style.display   = 'block';
+  }
+}
+
+loadData();
+setInterval(loadData, 5 * 60 * 1000); // 5 dakikada bir otomatik yenile
+</script>
+</body>
+</html>
