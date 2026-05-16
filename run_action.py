@@ -1,7 +1,7 @@
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # GitHub Actions'da mevcut klasörü path'e ekle
 sys.path.append(os.getcwd())
@@ -11,7 +11,6 @@ from fetcher import fetch_and_store
 from anomaly import detect_anomalies
 from alerts import send_anomaly_alerts, send_daily_summary
 
-# Log ayarları - Daha detaylı
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -21,40 +20,37 @@ logger = logging.getLogger(__name__)
 def run_once():
     """GitHub Actions için tek seferlik iş akışı."""
     try:
-        # 0. Hazırlık
         os.makedirs("data", exist_ok=True)
         init_db()
         
-        # Bugünün tarihini al (veya Cuma gününü zorla eğer haftasonuysa test için)
-        # GitHub Actions'da tarih UTC olduğu için bazen kaymalar olabilir
-        today = datetime.today().strftime("%Y-%m-%d")
-        logger.info("GitHub Action iş akışı başlıyor (Tarih: %s)", today)
-
-        # 1. Veri çek
-        # Not: Haftasonu veri gelmeyebilir, test için son işlem gününü bulmaya çalışabiliriz
-        count = fetch_and_store(today)
+        # Bugünün verisini çekmeyi dene, yoksa geriye doğru 3 gün tara
+        found = False
+        target_date = datetime.today()
         
-        if count == 0:
-            logger.warning("Veri bulunamadı. Bugün hafta sonu veya tatil olabilir.")
-            # Hata olarak saymıyoruz, sadece uyarıyoruz
-            return
-
-        # 2. Anomali tespiti
-        anomalies = detect_anomalies(today)
-        logger.info("Tespit edilen anomali sayısı: %d", len(anomalies))
-
-        # 3. Telegram alertleri gönder
-        if anomalies:
-            send_anomaly_alerts(anomalies, today)
-
-        # 4. Günlük özet gönder
-        send_daily_summary(today)
-
-        logger.info("İş akışı başarıyla tamamlandı.")
+        for i in range(4): # Bugün, dün, evvelsi gün...
+            date_str = (target_date - timedelta(days=i)).strftime("%Y-%m-%d")
+            logger.info("%s tarihi için deneniyor...", date_str)
+            
+            count = fetch_and_store(date_str)
+            if count > 0:
+                logger.info("%s tarihi için %d kayıt bulundu ve işlendi.", date_str, count)
+                
+                # Anomali ve özet işlemleri
+                anomalies = detect_anomalies(date_str)
+                if anomalies:
+                    send_anomaly_alerts(anomalies, date_str)
+                
+                send_daily_summary(date_str)
+                found = True
+                break
+        
+        if not found:
+            logger.warning("Son 4 gün içinde işlenecek veri bulunamadı.")
+        else:
+            logger.info("İş akışı başarıyla tamamlandı.")
 
     except Exception as e:
         logger.error("KRİTİK HATA: %s", str(e), exc_info=True)
-        # GitHub Action'ın fail vermesi için hatayı fırlatıyoruz
         sys.exit(1)
 
 if __name__ == "__main__":
