@@ -67,10 +67,17 @@ def get_deep_insight(code, name=""):
 def fetch_twitter_trends(valid_codes):
     """
     X (Twitter) üzerindeki finansal cashtag ($) ve hashtag (#) yoğunluğunu 
-    Google Real-Time indeksleri üzerinden doğrudan geçerli fon kodlarıyla eşleştirir.
+    Serper.dev API kullanarak doğrudan geçerli fon kodlarıyla eşleştirir.
+    CAPTCHA ve bot engellerini tamamen aşar.
     """
+    import json
     mentions = {}
     if not valid_codes:
+        return mentions
+        
+    api_key = os.getenv("SERPER_API_KEY", "")
+    if not api_key:
+        print("Uyarı: SERPER_API_KEY bulunamadı (.env dosyasına ekleyin). X taraması atlanıyor.")
         return mentions
 
     # X'teki finansal toplulukların (Fintwit) kullandığı spesifik kalıplar
@@ -91,27 +98,38 @@ def fetch_twitter_trends(valid_codes):
         'site:twitter.com ("serbest fon" OR "hisse senedi fonu" OR "para piyasası fonu" OR "kıymetli madenler fonu")'
     ]
     
+    url = "https://google.serper.dev/search"
+    headers = {
+      'X-API-KEY': api_key,
+      'Content-Type': 'application/json'
+    }
+    
     try:
         for q in queries:
-            # Son 24 saatteki X indekslerini yakalamak için qdr:d kullanımı kritik
-            url = f"https://www.google.com/search?q={q}&tbs=qdr:d&num=50"
-            res = requests.get(url, headers=HTTP_HEADERS, timeout=10)
+            payload = json.dumps({
+              "q": q,
+              "tbs": "qdr:d",
+              "num": 50,
+              "gl": "tr",
+              "hl": "tr"
+            })
+            res = requests.post(url, headers=headers, data=payload, timeout=10)
             
             if res.status_code != 200:
+                print(f"Serper API hatası: {res.status_code}")
                 continue
                 
-            soup = BeautifulSoup(res.text, 'lxml')
+            data = res.json()
+            organics = data.get("organic", [])
             
-            # Sadece arama sonuçlarının snippet (özet) metinlerini tara
-            search_snippets = soup.find_all(['div', 'span'], class_=['VwiC3b', 'yXM6Id', 'MUFIg'])
-            text_pool = " ".join([node.get_text().upper() for node in search_snippets]) if search_snippets else soup.get_text().upper()
+            # API'den dönen tüm özet (snippet) metinlerini birleştir
+            text_pool = " ".join([item.get("snippet", "").upper() for item in organics if "snippet" in item])
             
-            # Finansal Cashtag ($) ve Hashtag (#) bazlı fon yakalama: $XYZ veya #XYZ
+            # Finansal Cashtag ($) ve Hashtag (#) bazlı fon yakalama
             # Sadece 3 harfli büyük harf kombinasyonlarını arar
             potential_codes = re.findall(r'[\$\#\b]([A-Z]{3})\b', text_pool)
             
             for c in potential_codes:
-                # Blacklist kontrolü kaldırıldı, doğrudan geçerli TEFAS kod listesiyle doğrulanıyor
                 if c in valid_codes:
                     # Cashtag ile ($) doğrudan hedef gösterildiyse ilgiyi 2 kat say
                     weight = 2 if f"${c}" in text_pool else 1
@@ -120,7 +138,7 @@ def fetch_twitter_trends(valid_codes):
         # En çok konuşulan ilk 20 fonu sırala
         return dict(sorted(mentions.items(), key=lambda x: x[1], reverse=True)[:20])
     except Exception as e:
-        print(f"X Trend tarama hatası: {e}")
+        print(f"X Trend tarama hatası (Serper): {e}")
         return {}
 
 def detect_social_trends(date_str, names_dict=None):
