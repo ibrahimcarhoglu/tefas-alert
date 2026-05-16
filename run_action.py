@@ -18,35 +18,50 @@ from alerts import send_anomaly_alerts, send_daily_summary, send_periodic_summar
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-def get_news_reason(code):
+def get_deep_insight(code):
+    """Google'daki haber snippet'larından derin analiz (Neden?) çıkarır."""
     try:
-        url = f"https://www.google.com/search?q={code}+fonu+neden+konu%C5%9Fuluyor+haberleri&tbs=qdr:w"
-        headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        url = f"https://www.google.com/search?q={code}+fonu+neden+konu%C5%9Fuluyor+haber+detay&tbs=qdr:w"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'lxml')
-        results = soup.find_all('h3')
+        
+        # Haber başlıklarını ve altındaki kısa açıklamaları tara
+        results = soup.find_all('div', {'class': 'VwiC3b'}) # Google snippet class'ı
         if results:
-            reason = results[0].get_text()
-            return f"Analiz: {reason[:80]}..."
-        return "Yatırımcı ilgisi artış gösteriyor."
+            insight = results[0].get_text()
+            return f"Neden Gündemde? {insight[:140]}..."
+        
+        # Başlıklardan dene
+        titles = soup.find_all('h3')
+        if titles:
+            return f"Neden Gündemde? {titles[0].get_text()}"
+            
+        return "Neden: Yatırımcı ilgisi ve sosyal medya trafiğinde ani artış."
     except:
-        return "Piyasa gündeminde yer alıyor."
+        return "Neden: Piyasa gündeminde öne çıkan hareketlilik."
 
 def fetch_twitter_trends():
+    """Objektif olarak en çok konuşulan kodları yakalar."""
+    mentions = {}
     try:
-        # Aramayı daha da genişletiyoruz
-        url = "https://www.google.com/search?q=site:twitter.com+%22tefas%22+OR+%22fonu%22+OR+%22hisse%22&tbs=qdr:d"
+        queries = [
+            'site:twitter.com "TEFAS" "fonu" gündem',
+            'site:twitter.com "$*" yatırım fonu',
+            'site:twitter.com "en çok kazandıran fonlar" twitter'
+        ]
         headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-        response = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(response.text, 'lxml')
-        text = soup.get_text().upper()
         
-        # Hem $MAC hem #MAC hem de sadece MAC (3 harfli büyük harf) yakala
-        codes = re.findall(r'[$#]?([A-Z]{3})', text)
-        
-        # Sadece bilinen fon kodlarına benzeyenleri tut (İstatistiksel filtre)
-        counts = pd.Series(codes).value_counts()
-        return counts.head(15).to_dict()
+        for q in queries:
+            url = f"https://www.google.com/search?q={q}&tbs=qdr:d"
+            res = requests.get(url, headers=headers, timeout=8)
+            soup = BeautifulSoup(res.text, 'lxml')
+            text = soup.get_text().upper()
+            codes = re.findall(r'\b([A-Z]{3})\b', text)
+            for c in codes:
+                if c not in ['USD', 'EUR', 'KAP', 'IST', 'BIST', 'TRY', 'YAT', 'SON', 'GUN', 'BOS', 'FON']:
+                    mentions[c] = mentions.get(c, 0) + 1
+        return dict(sorted(mentions.items(), key=lambda x: x[1], reverse=True)[:20])
     except:
         return {}
 
@@ -61,7 +76,7 @@ def detect_social_trends(date_str):
     JOIN fund_daily t2 ON t1.code = t2.code
     WHERE t1.date = ? AND t2.date = (SELECT MAX(date) FROM fund_daily WHERE date < ?)
     ORDER BY growth_pct DESC
-    LIMIT 30
+    LIMIT 40
     """
     trends = []
     try:
@@ -70,29 +85,28 @@ def detect_social_trends(date_str):
         
         for _, row in df.iterrows():
             code = row['fund_code']
-            # Filtreyi minimuma çekiyoruz (Hassas Mod)
             if row['growth_count'] >= 1:
-                extra = "🔥 Trend!" if code in twitter_mentions else ""
-                reason = get_news_reason(code)
+                is_twitter_hot = code in twitter_mentions
+                insight = get_deep_insight(code)
                 trends.append({
                     "code": code,
-                    "growth": f"+%{row['growth_pct']:.2f} (+{int(row['growth_count'])} kişi)",
-                    "reason": f"{extra} {reason}"
+                    "growth": f"+%{row['growth_pct']:.2f} (+{int(row['growth_count'])} yeni yatırımcı)",
+                    "reason": f"{'🔥 Twitter Gündemi!' if is_twitter_hot else ''}\n{insight}"
                 })
         
-        # Eğer hala liste boşsa Twitter'dan gelenleri direkt ekle
-        if len(trends) < 5:
-            for t_code in twitter_mentions:
-                if t_code not in [t['code'] for t in trends] and len(trends) < 10:
-                    reason = get_news_reason(t_code)
-                    trends.append({
-                        "code": t_code,
-                        "growth": "Twitter Radarı",
-                        "reason": reason
-                    })
+        # Twitter'daki sıcak kodlar yatırımcıya yansımadıysa bile ekle
+        for t_code in twitter_mentions:
+            if t_code not in [t['code'] for t in trends] and len(trends) < 10:
+                insight = get_deep_insight(t_code)
+                trends.append({
+                    "code": t_code,
+                    "growth": "🚀 Sosyal Medya İvmesi",
+                    "reason": insight
+                })
                     
         conn.close()
-        return trends[:10]
+        # Twitter'da olanları başa çek
+        return sorted(trends, key=lambda x: "🔥" in x['reason'], reverse=True)[:10]
     except Exception as e:
         logger.error("Trend analizi hatası: %s", e)
         return []
