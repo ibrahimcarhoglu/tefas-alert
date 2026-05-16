@@ -72,18 +72,34 @@ def send_social_pulse(date_str: str, trending_funds: list[dict]):
     asyncio.run(_send_message("\n".join(lines)))
 
 def send_periodic_summary(date_str: str, periodic_results: dict):
-    header = f"🚀 <b>TOP 20 PERİYODİK ANALİZ</b>\n📅 Tarih: {date_str}\n━━━━━━━━━━━━━━━━━━━━━━━━"
-    asyncio.run(_send_message(header))
-    
+    """TOP 15 Periyodik Getiri Listesini zengin tasarımla raporlar."""
     for label, df in periodic_results.items():
-        lines = [f"🔥 <b>{label}:</b>"]
-        for _, row in df.iterrows():
+        lines = [
+            "⚡ <b>PERİYODİK ANALİZ</b>",
+            f"🚀 <b>TOP 15 GETİRİ LİSTESİ ({label.upper()})</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"📅 <code>{date_str}</code> · 📈 <code>{label} Vade</code> · 🏛️ <code>TEFAS</code>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        ]
+        
+        for idx, (_, row) in enumerate(df.iterrows(), 1):
             code = row['fund_code']
             fname = row.get('fund_name', 'Bilinmeyen Fon')
             safe_name = html.escape(str(fname))
-            name = safe_name[:35] + "..." if len(safe_name) > 35 else safe_name
-            lines.append(f"<a href='{TEFAS_URL}{code}'><b>{code}</b></a> - %{row['pct_change']:>5.2f}\n<pre>{name}</pre>")
-        lines.append(f"────────────────────────")
+            name = safe_name[:40] + "..." if len(safe_name) > 40 else safe_name
+            
+            pct = row['pct_change']
+            pct_str = f"+%{pct:.2f}" if pct >= 0 else f"-%{abs(pct):.2f}"
+            emoji = "🔼" if pct >= 0 else "🔽"
+            
+            rank_str = f"<b>{idx:02d}.</b>"
+            code_str = f"<code>[{code}]</code>"
+            
+            lines.append(f"{rank_str} {code_str}  {emoji} <b>{pct_str}</b>")
+            lines.append(f"↳ <i>{name}</i>\n")
+            
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("⚠️ <i>Yatırım tavsiyesi değildir · Geçmiş getiri garanti oluşturmaz</i>")
         asyncio.run(_send_message("\n".join(lines)))
 
 def send_anomaly_alerts(anomalies: list[dict], date: str):
