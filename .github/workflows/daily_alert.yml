@@ -6,6 +6,9 @@ on:
     - cron: '30 7 * * *'
   workflow_dispatch: # Manuel tetikleme için
 
+permissions:
+  contents: write # Veritabanını geri push edebilmesi için gerekli
+
 jobs:
   run-alert:
     runs-on: ubuntu-latest
@@ -31,7 +34,6 @@ jobs:
           DAILY_RETURN_THRESHOLD: 5.0
           FUND_TYPE: YAT
         run: |
-          # Tek seferlik çalıştırma için scheduler.py'daki run_daily_job mantığını kullanan bir script çalıştıracağız
           python run_action.py
 
       - name: Commit and Push Database Changes
