@@ -25,25 +25,31 @@ async def _send_message(text: str):
     else:
         await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text, parse_mode=ParseMode.HTML)
 
-def send_daily_summary(date: str = None):
+def send_daily_summary(date: str = None, names: dict = None):
+    """Günlük özet (Artık isimlerle birlikte)."""
     data = get_dashboard_data()
     if not data: return
     total_inflow = data.get("total_inflow", 0)
     top_inflows = data.get("top_inflows", [])[:5]
+    names = names or {}
+    
     lines = [
         f"📊 <b>GÜNLÜK ÖZET</b> — {date}",
         f"━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"📈 Para Girişi: <b>{_fmt_try(total_inflow)}</b>",
+        f"📈 Toplam Giriş: <b>{_fmt_try(total_inflow)}</b>",
         "\n💰 <b>En Çok Para Girişi:</b>"
     ]
     for r in top_inflows:
-        lines.append(f"  • {r[0]}: {_fmt_try(r[1])}")
+        code = r[0]
+        fname = names.get(code, "")
+        name_str = f"\n<pre>{fname[:25]}...</pre>" if fname else ""
+        lines.append(f"• <b>{code}</b>: {_fmt_try(r[1])}{name_str}")
+    
     asyncio.run(_send_message("\n".join(lines)))
 
 def send_periodic_summary(date_str: str, periodic_results: dict):
-    """Periyotlara göre Top 20 listesi (İsimler dahil)."""
     lines = [
-        f"🚀 <b>TOP 20 PERİYODİK GETİRİ ANALİZİ</b>",
+        f"🚀 <b>TOP 20 PERİYODİK ANALİZ</b>",
         f"📅 Tarih: {date_str}",
         f"━━━━━━━━━━━━━━━━━━━━━━━━"
     ]
@@ -51,8 +57,9 @@ def send_periodic_summary(date_str: str, periodic_results: dict):
     for label, df in periodic_results.items():
         lines.append(f"\n🔥 <b>{label}:</b>")
         for _, row in df.iterrows():
-            # Fon ismini biraz kısalt (max 30 karakter)
-            name = row['fund_name'][:30] + "..." if len(row['fund_name']) > 30 else row['fund_name']
+            # fund_name sütunu yoksa kod yaz, varsa ismi kullan
+            fname = row.get('fund_name', 'Bilinmeyen Fon')
+            name = fname[:30] + "..." if len(fname) > 30 else fname
             lines.append(f"<b>{row['fund_code']}</b> - %{row['pct_change']:>5.2f}\n<pre>{name}</pre>")
         lines.append(f"────────────────────────")
 

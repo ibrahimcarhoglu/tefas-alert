@@ -22,8 +22,17 @@ def calculate_periodic_top20(latest_date_str, c):
     df_latest = c.fetch(start=latest_date_str, end=latest_date_str, kind="YAT")
     if df_latest is None or df_latest.empty: return {}
     
-    # fund_name sütununu da alıyoruz
-    df_latest = df_latest[['fund_code', 'fund_name', 'price']].rename(columns={'price': 'p_lat'})
+    # Sütun isimlerini kontrol et ve fund_name'i bul (farklı versiyonlarda name/fund_name olabilir)
+    cols = df_latest.columns.tolist()
+    name_col = 'fund_name' if 'fund_name' in cols else ('name' if 'name' in cols else None)
+    
+    selected_cols = ['fund_code', 'price']
+    if name_col:
+        selected_cols.append(name_col)
+        
+    df_latest = df_latest[selected_cols].rename(columns={'price': 'p_lat'})
+    if name_col and name_col != 'fund_name':
+        df_latest = df_latest.rename(columns={name_col: 'fund_name'})
     
     periods = {"3 Gün": 3, "1 Hafta": 7, "2 Hafta": 14, "1 Ay": 30, "7 Hafta": 49}
     results = {}
@@ -37,7 +46,6 @@ def calculate_periodic_top20(latest_date_str, c):
                 df_prev = df_prev[['fund_code', 'price']].rename(columns={'price': 'p_pre'})
                 df = pd.merge(df_latest, df_prev, on='fund_code')
                 df['pct_change'] = (df['p_lat'] - df['p_pre']) / df['p_pre'] * 100
-                # En iyi 20'yi al
                 results[label] = df.sort_values(by='pct_change', ascending=False).head(20)
                 break
     return results
@@ -55,11 +63,18 @@ def run_once():
             break
     
     if found_date:
+        # 1. Anomali ve Günlük Özet
         anomalies = detect_anomalies(found_date)
         send_anomaly_alerts(anomalies, found_date)
-        send_daily_summary(found_date)
         
-        logger.info("Periyodik analiz yapılıyor (İsimlerle birlikte)...")
+        # Günlük özette isimleri de alabilmek için crawler'dan anlık veri çekelim
+        df_today = c.fetch(start=found_date, end=found_date, kind="YAT")
+        names_dict = dict(zip(df_today['fund_code'], df_today['fund_name'])) if df_today is not None else {}
+        
+        send_daily_summary(found_date, names_dict)
+        
+        # 2. Periyodik Top 20
+        logger.info("Periyodik analiz yapılıyor...")
         periodic_results = calculate_periodic_top20(found_date, c)
         if periodic_results:
             send_periodic_summary(found_date, periodic_results)
