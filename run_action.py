@@ -83,10 +83,10 @@ def fetch_twitter_trends(valid_codes):
     # Tek seferde (kredi harcamasını minimize ederek) Fintwit'in kalbini vuran optimize sorgular
     queries = [
         # 1. Ana Damar: İçinde TEFAS veya Fon kelimesi geçen ve doğrudan Cashtag ($) içeren tweetler
-        'site:twitter.com ("tefas" OR "yatırım fonu" OR "fonlar") "$"',
+        'site:twitter.com ("tefas" OR "yatırım fonu" OR "fonlar")',
         
         # 2. Aksiyon ve Popülerlik: Yatırımcıların alım/satım veya "en iyi" muhabbeti döndürdüğü tweetler
-        'site:twitter.com "fon" ("aldım" OR "portföy" OR "kazandıran" OR "gündem")',
+        'site:twitter.com "fon" ("aldım" OR "portföy" OR "kazandıran")',
         
         # 3. Kanaat Önderleri (Seed Accounts): Önemli finans/fon analiz hesaplarının ve onlara verilen yanıtların radarına giren fonlar
         'site:twitter.com ("Fon_Eko" OR "FonTahmin" OR "FonetikFunds" OR "TEFASGovTr" OR "tefasvebefasfon" OR "Fintablescom" OR "getmidas") "$"',
