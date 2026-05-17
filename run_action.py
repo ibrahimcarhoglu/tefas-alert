@@ -92,7 +92,30 @@ def fetch_twitter_trends(valid_codes):
         'site:twitter.com ("Fon_Eko" OR "FonTahmin" OR "FonetikFunds" OR "TEFASGovTr" OR "tefasvebefasfon" OR "Fintablescom" OR "getmidas") "$"',
         
         # 4. Tematik Odak: Para girişi, yatırımcı sayısı ve fon büyüklüğü gibi yapısal verileri tartışan tweetler
-        'site:x.com ("para girişi" OR "yatırımcı sayısı" OR "fon büyüklüğü")'
+        'site:x.com ("para girişi" OR "yatırımcı sayısı" OR "fon büyüklüğü")',
+
+        'site:x.com (#fon OR #tefas OR #yatirimfonu OR #fonlar)',
+
+        # 📈 1. İşlem / para akışı sinyali (en güçlü)
+        'site:x.com (ekledim OR aldım OR topluyorum OR "portföye ekledim" OR "pozisyon açtım" OR "kademeli alım")',
+
+        # 💼 2. Portföy / sepet / allocation dili
+        'site:x.com ("sepetim" OR "portföyüm" OR "dağılım" OR "fon dağılımı" OR "% cash" OR "% hisse" OR "risk azaltıyorum")',
+
+        # 🚀 3. Momentum / hype / FOMO dili
+        'site:x.com (uçtu OR roket OR patladı OR moon OR bullish OR momentum OR breakout OR "güçlü gidiyor" OR "fena değil" OR ATH)',
+
+        # 💸 4. TEFAS / fon flow / veri dili
+        'site:x.com ("para girişi var" OR "net giriş" OR "yatırımcı sayısı arttı" OR "yatırımcı sayısı azaldı" OR "fon büyüklüğü arttı" OR "TEFAS verisi" OR "en çok giren fon" OR "en çok çıkan fon")',
+
+        # 🧠 5. Karar / FUD / risk dili (top sinyali)
+        'site:x.com ("satmalı mıyım" OR "tehlikeli mi" OR "balon mu" OR "düşer mi" OR "riskli mi" OR "düzeltme gelir mi")',
+
+        # 🔥 6. Retail hype / agresif davranış
+        'site:x.com (full OR yüklendim OR "all in" OR "tam yükledim" OR "sert aldım" OR "kaçırdım")',
+
+        # 🧾 7. Kurumsal + analiz dili (TEFAS içerik üreticileri)
+        'site:x.com ("analiz" OR "rapor" OR "yorum" OR "değerlendirme" OR "fon inceleme" OR "portföy analizi")',
     ]
     
     url = "https://google.serper.dev/search"
