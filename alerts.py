@@ -139,3 +139,20 @@ async def send_anomaly_alerts(anomalies: list[dict], date: str):
         
     lines.append("\n────────────────────────")
     await _send_message("\n".join(lines))
+
+async def _test_telegram_connection_async() -> str:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        raise ValueError("TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID .env dosyasında tanımlı olmalı")
+    bot = Bot(token=TELEGRAM_BOT_TOKEN)
+    me = await bot.get_me()
+    await bot.send_message(
+        chat_id=TELEGRAM_CHAT_ID,
+        text="✅ TEFAS Alert bağlantı testi başarılı.",
+        parse_mode=ParseMode.HTML,
+    )
+    return me.username or ""
+
+
+def test_telegram_connection() -> str:
+    """Telegram bot ve chat erişimini doğrular; test mesajı gönderir."""
+    return asyncio.run(_test_telegram_connection_async())

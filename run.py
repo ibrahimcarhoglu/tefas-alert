@@ -9,6 +9,7 @@ Kullanım:
   python run.py --dashboard      # Dashboard verilerini yenile
 """
 import argparse
+import asyncio
 import logging
 import os
 import sys
@@ -98,10 +99,10 @@ def _run_for_date(date: str):
             print(f"  {a['severity']} {a['code']}: {a['label']} — {a['detail']}")
         if len(anomalies) > 10:
             print(f"  ... ve {len(anomalies) - 10} tane daha")
-        send_anomaly_alerts(anomalies, date)
+        asyncio.run(send_anomaly_alerts(anomalies, date))
         print("📱 Anomali alertleri Telegram'a gönderildi.")
 
-    send_daily_summary(date)
+    asyncio.run(send_daily_summary(date))
     print("📊 Günlük özet Telegram'a gönderildi.")
 
     # Dashboard JSON'ını güncelle

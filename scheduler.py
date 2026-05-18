@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -43,10 +44,10 @@ def run_daily_job():
 
         # 3. Telegram alertleri gönder
         if anomalies:
-            send_anomaly_alerts(anomalies, today)
+            asyncio.run(send_anomaly_alerts(anomalies, today))
 
         # 4. Günlük özet gönder
-        send_daily_summary(today)
+        asyncio.run(send_daily_summary(today))
 
         logger.info("Günlük iş akışı tamamlandı.")
 
