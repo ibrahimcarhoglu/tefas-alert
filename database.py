@@ -43,13 +43,85 @@ def init_db():
             sent_at    TEXT DEFAULT (datetime('now','localtime'))
         );
 
+        CREATE TABLE IF NOT EXISTS social_trends (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            date       TEXT NOT NULL,
+            code       TEXT NOT NULL,
+            pct        TEXT,
+            stat       TEXT,
+            reason     TEXT,
+            score      REAL,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(date, code)
+        );
+
+        CREATE TABLE IF NOT EXISTS fund_names (
+            code TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            management_fee REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS fund_breakdown (
+            date       TEXT NOT NULL,
+            code       TEXT NOT NULL,
+            allocation_json TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY(date, code)
+        );
+
+        CREATE TABLE IF NOT EXISTS portfolio_transactions (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id   TEXT NOT NULL,
+            code         TEXT NOT NULL,
+            tx_type      TEXT NOT NULL,
+            date         TEXT NOT NULL,
+            units        REAL NOT NULL,
+            unit_price   REAL NOT NULL,
+            created_at   TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS price_alert_rules (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id   TEXT NOT NULL,
+            code         TEXT NOT NULL,
+            threshold    REAL NOT NULL,
+            is_active    INTEGER DEFAULT 1,
+            created_at   TEXT DEFAULT (datetime('now','localtime'))
+        );
+
         CREATE INDEX IF NOT EXISTS idx_fund_daily_date ON fund_daily(date);
         CREATE INDEX IF NOT EXISTS idx_fund_daily_code ON fund_daily(code);
+        CREATE INDEX IF NOT EXISTS idx_portfolio_session_id ON portfolio_transactions(session_id);
+        CREATE INDEX IF NOT EXISTS idx_price_alert_session ON price_alert_rules(session_id);
     """)
+
+    # Mevcut kurulumlar için management_fee sütunu
+    try:
+        cursor.execute("ALTER TABLE fund_names ADD COLUMN management_fee REAL")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
 
     conn.commit()
     conn.close()
     logger.info("Veritabanı hazır: %s", DB_PATH)
+
+
+def save_fund_names(names_dict: dict):
+    """Fon kodlarını ve isimlerini veritabanına ekler/günceller."""
+    if not names_dict:
+        return
+    conn = get_connection()
+    cursor = conn.cursor()
+    records = list(names_dict.items())
+    cursor.executemany("""
+        INSERT INTO fund_names (code, name)
+        VALUES (?, ?)
+        ON CONFLICT(code) DO UPDATE SET name = excluded.name
+    """, records)
+    conn.commit()
+    conn.close()
+    logger.info("%d fon ismi güncellendi.", len(records))
 
 
 def insert_fund_data(records: list[dict]):
@@ -195,3 +267,62 @@ def get_dashboard_data(limit: int = 50):
         "total_inflow": stats[1] or 0,
         "total_outflow": stats[2] or 0,
     }
+
+
+def save_social_trends(date: str, trends: list[dict]):
+    """Sosyal medya trendlerini veritabanına ekler (UPSERT)."""
+    if not trends:
+        return
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    records = [
+        {
+            "date": date,
+            "code": t["code"],
+            "pct": str(t.get("pct", "")),
+            "stat": str(t.get("stat", "")),
+            "reason": str(t.get("reason", "")),
+            "score": float(t.get("score", 0.0))
+        }
+        for t in trends
+    ]
+
+    cursor.executemany("""
+        INSERT INTO social_trends (date, code, pct, stat, reason, score)
+        VALUES (:date, :code, :pct, :stat, :reason, :score)
+        ON CONFLICT(date, code) DO UPDATE SET
+            pct = excluded.pct,
+            stat = excluded.stat,
+            reason = excluded.reason,
+            score = excluded.score
+    """, records)
+
+    conn.commit()
+    conn.close()
+    logger.info("%d sosyal trend kaydı veritabanına yazıldı.", len(records))
+
+def save_fund_breakdown(date: str, data_list: list):
+    """
+    Tefas'tan gelen varlık dağılımı (breakdown) yüzdelerini fund_breakdown tablosuna kaydeder.
+    data_list formatı: [{'code': 'HCV', 'allocation_json': '{"stock_pct": 20.5}'}]
+    """
+    if not data_list:
+        return
+        
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.executemany("""
+            INSERT INTO fund_breakdown (date, code, allocation_json)
+            VALUES (?, ?, ?)
+            ON CONFLICT(date, code) DO UPDATE SET
+                allocation_json=excluded.allocation_json
+        """, [(date, d["code"], d["allocation_json"]) for d in data_list])
+        conn.commit()
+    except Exception as e:
+        logger.error("fund_breakdown kaydetme hatası: %s", e)
+        conn.rollback()
+    finally:
+        conn.close()
