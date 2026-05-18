@@ -1,11 +1,12 @@
 import logging
 from datetime import datetime, timedelta
+import sqlite3
 
 import pandas as pd
 from pytefas import Crawler
 
 from config import FUND_TYPE
-from database import insert_fund_data
+from database import insert_fund_data, get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +19,7 @@ def fetch_and_store(date: str = None):
     if date is None:
         date = datetime.today().strftime("%Y-%m-%d")
 
-    prev_date = (datetime.strptime(date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-
-    logger.info("TEFAS'tan veri çekiliyor (pytefas): %s (+ önceki gün: %s)", date, prev_date)
+    logger.info("TEFAS'tan veri çekiliyor (pytefas): %s", date)
 
     tefas = Crawler()
 
@@ -35,20 +34,47 @@ def fetch_and_store(date: str = None):
         logger.error("Bugün verisi çekilemedi: %s", e)
         raise
 
-    # Önceki gün verisi (net flow hesabı için)
-    try:
-        df_prev = tefas.fetch(
-            start=prev_date,
-            end=prev_date,
-            kind=FUND_TYPE
-        )
-    except Exception as e:
-        logger.warning("Önceki gün verisi çekilemedi: %s — Net flow hesaplanamayacak.", e)
-        df_prev = pd.DataFrame()
-
     if df_today is None or df_today.empty:
         logger.warning("TEFAS'tan bugün için boş veri döndü. Piyasa kapalı olabilir.")
         return 0
+
+    # Önceki gün verisini bul ve getir (net flow hesabı için)
+    df_prev = pd.DataFrame()
+    
+    # 1. Öncelik: Veritabanındaki en güncel önceki tarihi bulup oradan okumak
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT MAX(date) FROM fund_daily WHERE date < ?", (date,))
+        db_prev_date = cursor.fetchone()[0]
+        if db_prev_date:
+            logger.info("Önceki gün verisi yerel veritabanından okunuyor (tarih: %s)", db_prev_date)
+            df_prev = pd.read_sql_query(
+                "SELECT code, price, market_cap, num_investors, num_shares FROM fund_daily WHERE date = ?",
+                conn,
+                params=(db_prev_date,)
+            )
+        conn.close()
+    except Exception as e:
+        logger.warning("Yerel veritabanından önceki gün verisi okunamadı: %s", e)
+
+    # 2. Öncelik: Eğer veritabanı boşsa veya veri yoksa, geriye doğru günleri tek tek internetten dene (maksimum 5 gün)
+    if df_prev.empty:
+        for offset in range(1, 6):
+            check_date = (datetime.strptime(date, "%Y-%m-%d") - timedelta(days=offset)).strftime("%Y-%m-%d")
+            try:
+                logger.info("Önceki gün verisi internetten aranıyor (tarih: %s)...", check_date)
+                df_prev_fetched = tefas.fetch(
+                    start=check_date,
+                    end=check_date,
+                    kind=FUND_TYPE
+                )
+                if df_prev_fetched is not None and not df_prev_fetched.empty:
+                    df_prev = df_prev_fetched
+                    logger.info("Önceki gün verisi internetten başarıyla çekildi (tarih: %s)", check_date)
+                    break
+            except Exception as e:
+                logger.warning("%s tarihi için veri çekilemedi: %s", check_date, e)
 
     # Kolon eşleme: pytefas -> database
     # pytefas: fund_code, portfolio_size, investor_count, shares_outstanding

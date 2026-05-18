@@ -26,6 +26,8 @@ async def _send_message(text: str):
         logger.error("Mesaj gönderilemedi: %s", e)
 
 def _fmt_try(amount: float) -> str:
+    if amount is None:
+        return "0.00 ₺"
     if abs(amount) >= 1_000_000_000:
         return f"{amount/1_000_000_000:+.2f}B ₺"
     elif abs(amount) >= 1_000_000:
