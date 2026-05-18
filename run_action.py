@@ -128,7 +128,7 @@ def fetch_twitter_trends(valid_codes):
         for q in queries:
             payload = json.dumps({
               "q": q,
-              "tbs": "qdr:d7",
+              "tbs": "qdr:d3",
               "gl": "tr",
               "hl": "tr"
             })
