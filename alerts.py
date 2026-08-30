@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import html
+import io
 import re
 import sqlite3
 from telegram import Bot
@@ -30,6 +31,24 @@ async def _send_message(text: str):
         )
     except Exception as e:
         logger.error("Mesaj gönderilemedi: %s", e)
+
+
+async def _send_photo_bytes(data: bytes, filename: str, caption: str) -> None:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not data:
+        return
+    bot = Bot(token=TELEGRAM_BOT_TOKEN)
+    photo = io.BytesIO(data)
+    photo.name = filename
+    try:
+        await bot.send_photo(
+            chat_id=TELEGRAM_CHAT_ID,
+            photo=photo,
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as exc:
+        logger.error("Görsel mesaj gönderilemedi: %s", exc)
+        raise
 
 def _fmt_try(amount: float) -> str:
     if amount is None:
@@ -415,6 +434,60 @@ async def send_latest_signal_tables(limit: int = 20) -> None:
 
     await send_main_signal_table(get_ranked_signals(limit=limit), limit=limit)
     await send_emerging_signal_table(get_emerging_fund_radar(limit=limit), limit=limit)
+
+
+def _caption_links(items: list[dict], limit: int) -> str:
+    links = []
+    for item in items[:limit]:
+        code = html.escape(str(item.get("code") or ""))
+        url = html.escape(str(item.get("tefas_url") or f"{TEFAS_URL}{code}"), quote=True)
+        links.append(f"<a href='{url}'>{code}</a>")
+    return " · ".join(links)
+
+
+async def send_signal_images(main_payload: dict, emerging_payload: dict, limit: int = 20) -> None:
+    """Ana ve yeni fon tablolarını iki yüksek çözünürlüklü PNG olarak gönder."""
+    try:
+        from signal_cards import render_emerging_card, render_main_card
+
+        main_rows = (main_payload or {}).get("ranking") or []
+        emerging_rows = (emerging_payload or {}).get("radar") or []
+        main_date = str((main_payload or {}).get("signal_date") or "—")
+        emerging_date = str((emerging_payload or {}).get("signal_date") or "—")
+        main_caption = (
+            f"🏆 <b>ANA SİNYAL LİSTESİ · İLK 20</b>\n"
+            f"📅 {html.escape(main_date)}\n"
+            f"🔗 {_caption_links(main_rows, limit)}"
+        )
+        emerging_caption = (
+            f"🌱 <b>YENİ FON RADARI · İLK 20</b>\n"
+            f"📅 {html.escape(emerging_date)}\n"
+            f"🔗 {_caption_links(emerging_rows, limit)}"
+        )
+        await _send_photo_bytes(
+            render_main_card(main_payload, limit=limit),
+            f"tefas-ana-{main_date}.png",
+            main_caption,
+        )
+        await _send_photo_bytes(
+            render_emerging_card(emerging_payload, limit=limit),
+            f"tefas-yeni-{emerging_date}.png",
+            emerging_caption,
+        )
+    except Exception:
+        logger.exception("Sinyal görselleri üretilemedi; metin tablosuna dönülüyor")
+        await send_main_signal_table(main_payload, limit=limit)
+        await send_emerging_signal_table(emerging_payload, limit=limit)
+
+
+async def send_latest_signal_images(limit: int = 20) -> None:
+    from signals import get_emerging_fund_radar, get_ranked_signals
+
+    await send_signal_images(
+        get_ranked_signals(limit=limit),
+        get_emerging_fund_radar(limit=limit),
+        limit=limit,
+    )
 
 
 async def _test_telegram_connection_async() -> str:

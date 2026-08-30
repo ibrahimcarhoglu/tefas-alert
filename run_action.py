@@ -17,7 +17,7 @@ from anomaly import detect_anomalies
 from alerts import (
     send_anomaly_alerts,
     send_daily_summary,
-    send_latest_signal_tables,
+    send_latest_signal_images,
     send_periodic_summary,
     send_social_pulse,
     send_rotation_signal_alert,
@@ -291,7 +291,7 @@ def run_once():
     if found_date and previous_latest and found_date <= previous_latest:
         if os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch":
             logger.info("Manuel çalıştırma: son ana liste ve yeni fon radarı Telegram'a gönderiliyor.")
-            asyncio.run(send_latest_signal_tables(limit=20))
+            asyncio.run(send_latest_signal_images(limit=20))
         logger.info("Yeni TEFAS işlem günü yok; Telegram mesajları yinelenmeyecek (son tarih: %s).", previous_latest)
         return
 
@@ -300,7 +300,7 @@ def run_once():
         rotation = run_weekly_rotation(found_date)
         if rotation.get("generated"):
             asyncio.run(send_rotation_signal_alert(rotation))
-            asyncio.run(send_latest_signal_tables(limit=20))
+            asyncio.run(send_latest_signal_images(limit=20))
             try:
                 backtest = run_backtest(max_dates=1000)
                 logger.info("Backtest güncellendi: %s dönem", backtest["metrics"]["periods"])
