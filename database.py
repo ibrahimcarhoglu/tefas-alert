@@ -353,13 +353,23 @@ def get_all_codes_for_date(date: str):
 
 
 def log_alert(date: str, code: str, alert_type: str, value: float, z_score: float, message: str):
-    """Alert kaydını veritabanına yazar."""
+    """Aynı gün/fon/tür alarmını çoğaltmadan kaydet."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO alerts_log (date, code, alert_type, value, z_score, message)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (date, code, alert_type, value, z_score, message))
+    existing = cursor.execute(
+        "SELECT id FROM alerts_log WHERE date=? AND code=? AND alert_type=? LIMIT 1",
+        (date, code, alert_type),
+    ).fetchone()
+    if existing:
+        cursor.execute(
+            "UPDATE alerts_log SET value=?, z_score=?, message=?, sent_at=datetime('now','localtime') WHERE id=?",
+            (value, z_score, message, existing[0]),
+        )
+    else:
+        cursor.execute("""
+            INSERT INTO alerts_log (date, code, alert_type, value, z_score, message)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (date, code, alert_type, value, z_score, message))
     conn.commit()
     conn.close()
 
@@ -381,7 +391,7 @@ def get_dashboard_data(limit: int = 50):
     cursor.execute("""
         SELECT code, net_flow, pct_change, num_investors, market_cap
         FROM fund_daily
-        WHERE date = ?
+        WHERE date = ? AND net_flow > 0
         ORDER BY net_flow DESC
         LIMIT 10
     """, (last_date,))
@@ -391,7 +401,7 @@ def get_dashboard_data(limit: int = 50):
     cursor.execute("""
         SELECT code, net_flow, pct_change, num_investors, market_cap
         FROM fund_daily
-        WHERE date = ?
+        WHERE date = ? AND net_flow < 0
         ORDER BY net_flow ASC
         LIMIT 10
     """, (last_date,))
@@ -401,7 +411,7 @@ def get_dashboard_data(limit: int = 50):
     cursor.execute("""
         SELECT code, pct_change, net_flow, num_investors, market_cap
         FROM fund_daily
-        WHERE date = ?
+        WHERE date = ? AND pct_change IS NOT NULL
         ORDER BY pct_change DESC
         LIMIT 10
     """, (last_date,))
@@ -436,6 +446,7 @@ def get_dashboard_data(limit: int = 50):
         "total_funds": stats[0],
         "total_inflow": stats[1] or 0,
         "total_outflow": stats[2] or 0,
+        "net_flow": (stats[1] or 0) + (stats[2] or 0),
     }
 
 

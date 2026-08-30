@@ -205,6 +205,92 @@ async def send_social_momentum_image(payload: dict, limit: int = 10) -> None:
         fallback.append("⚠️ <i>Sosyal veri ana işlem sinyalini değiştirmez.</i>")
         await _send_message("\n".join(fallback))
 
+
+async def send_market_pulse_card(payload: dict, limit: int = 5) -> None:
+    """PPF hariç günlük giriş/çıkış nabzını tek PNG olarak gönder."""
+    from notification_cards import render_market_pulse_card
+
+    date_str = str((payload or {}).get("date") or "—")
+    rows = list((payload or {}).get("top_inflows") or []) + list((payload or {}).get("top_outflows") or [])
+    caption = (
+        "💸 <b>TEFAS GÜNLÜK PİYASA NABZI</b>\n"
+        f"📅 {html.escape(date_str)} · PPF hariç\n"
+        f"🔗 {_caption_links(rows, limit * 2)}"
+    )
+    try:
+        await _send_photo_bytes(render_market_pulse_card(payload, limit), f"tefas-piyasa-nabzi-{date_str}.png", caption)
+    except Exception:
+        logger.exception("Piyasa Nabzı kartı gönderilemedi; kısa özete dönülüyor")
+        await _send_message(
+            f"💸 <b>TEFAS GÜNLÜK PİYASA NABZI</b>\n📅 {html.escape(date_str)}\n"
+            f"Giriş: <code>{_fmt_try(payload.get('gross_inflow'))}</code>\n"
+            f"Çıkış: <code>{_fmt_try(payload.get('gross_outflow'))}</code>\n"
+            f"Gerçek net: <code>{_fmt_try(payload.get('net_flow'))}</code>"
+        )
+
+
+async def send_performance_card(payload: dict, limit: int = 10) -> None:
+    """Getiri liderlerini devamlılık teyidiyle tek PNG olarak gönder."""
+    from notification_cards import render_performance_card
+
+    date_str = str((payload or {}).get("date") or "—")
+    rows = list((payload or {}).get("leaders") or [])
+    caption = (
+        "⚡ <b>GETİRİ VE DEVAMLILIK · İLK 10</b>\n"
+        f"📅 {html.escape(date_str)} · PPF hariç\n"
+        f"🔗 {_caption_links(rows, limit)}"
+    )
+    try:
+        await _send_photo_bytes(render_performance_card(payload, limit), f"tefas-devamlilik-{date_str}.png", caption)
+    except Exception:
+        logger.exception("Getiri ve Devamlılık kartı gönderilemedi")
+        lines = ["⚡ <b>GETİRİ VE DEVAMLILIK</b>", f"📅 {html.escape(date_str)}"]
+        for item in rows[:limit]:
+            lines.append(f"<b>{item.get('code')}</b> · {_short(item.get('performance_label'), 22)} · {_score(item.get('continuation_score'))}")
+        await _send_message("\n".join(lines))
+
+
+async def send_anomaly_card(payload: dict, limit: int = 10) -> None:
+    """Gruplanmış anomalileri önem sıralı PNG olarak gönder; boşsa sessiz kal."""
+    rows = list((payload or {}).get("anomalies") or [])
+    if not rows:
+        return
+    from notification_cards import render_anomaly_card
+
+    date_str = str((payload or {}).get("date") or "—")
+    caption = (
+        "🚨 <b>AKILLI ANOMALİ ALARMI</b>\n"
+        f"📅 {html.escape(date_str)} · {len(rows[:limit])} fon\n"
+        f"🔗 {_caption_links(rows, limit)}"
+    )
+    try:
+        await _send_photo_bytes(render_anomaly_card(payload, limit), f"tefas-anomali-{date_str}.png", caption)
+    except Exception:
+        logger.exception("Anomali kartı gönderilemedi; eski metin alarmına dönülüyor")
+        raw = [alert for item in rows[:limit] for alert in item.get("alerts") or []]
+        await send_anomaly_alerts(raw, date_str)
+
+
+async def send_rotation_card(payload: dict, limit: int = 20) -> None:
+    """Yalnızca durum değiştiren rotasyon fonlarını PNG olarak gönder."""
+    rows = list((payload or {}).get("changes") or [])
+    if not rows:
+        logger.info("Rotasyon üretildi ancak durum değiştiren fon yok; bildirim atlandı")
+        return
+    from notification_cards import render_rotation_card
+
+    date_str = str((payload or {}).get("signal_date") or "—")
+    caption = (
+        "🧭 <b>HAFTALIK ROTASYON DEĞİŞİMİ</b>\n"
+        f"📅 {html.escape(date_str)} · {len(rows[:limit])} değişiklik\n"
+        f"🔗 {_caption_links(rows, limit)}"
+    )
+    try:
+        await _send_photo_bytes(render_rotation_card(payload, limit), f"tefas-rotasyon-{date_str}.png", caption)
+    except Exception:
+        logger.exception("Rotasyon kartı gönderilemedi; eski metin bildirimine dönülüyor")
+        await send_rotation_signal_alert(payload)
+
 async def send_periodic_summary(date_str: str, periodic_results: dict):
     for label, df in periodic_results.items():
         lines = [

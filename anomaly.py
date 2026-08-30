@@ -4,9 +4,14 @@ from datetime import datetime
 import numpy as np
 
 from config import Z_SCORE_THRESHOLD, DAILY_RETURN_THRESHOLD, MARKET_CAP_CHANGE_THRESHOLD
-from database import get_recent_data, get_all_codes_for_date, log_alert
+from database import get_recent_data, get_all_codes_for_date, get_connection, log_alert
+from signals import classify_category
 
 logger = logging.getLogger(__name__)
+
+MIN_ANOMALY_HISTORY = 20
+MIN_MARKET_CAP = 50_000_000
+MIN_INVESTORS = 50
 
 
 def _z_score(series: list[float]) -> float:
@@ -40,23 +45,47 @@ def detect_anomalies(date: str = None) -> list[dict]:
 
     anomalies = []
 
+    conn = get_connection()
+    names = {
+        str(code): str(name)
+        for code, name in conn.execute("SELECT code, name FROM fund_names").fetchall()
+    }
+    conn.close()
+
     for row in funds_today:
         code, price, market_cap, num_investors, net_flow, pct_change, investor_change = row
+
+        if classify_category(names.get(str(code), "")) == "Para Piyasası":
+            continue
+        if (market_cap or 0) < MIN_MARKET_CAP or (num_investors or 0) < MIN_INVESTORS:
+            continue
 
         # Geçmiş veriyi çek (rolling hesap için)
         history = get_recent_data(code, days=35, end_date=date)
 
-        if len(history) < 5:
+        if len(history) < MIN_ANOMALY_HISTORY:
             continue
 
         # history: (date, net_flow, pct_change, investor_change, market_cap, num_investors)
-        net_flows = [h[1] for h in history if h[1] is not None]
+        flow_rates = [
+            history[index][1] / history[index - 1][4] * 100
+            for index in range(1, len(history))
+            if history[index][1] is not None
+            and history[index - 1][4] is not None
+            and history[index - 1][4] > 0
+        ]
         pct_changes = [h[2] for h in history if h[2] is not None]
-        inv_changes = [h[3] for h in history if h[3] is not None]
+        investor_rates = [
+            h[3] / (h[5] - h[3]) * 100
+            for h in history
+            if h[3] is not None and h[5] is not None and (h[5] - h[3]) > 0
+        ]
 
         # ─── 1. NET PARA AKIŞI ANOMALİSİ ─────────────────────────────
-        if net_flow is not None and len(net_flows) >= 5:
-            z = _z_score(net_flows)
+        previous_market_cap = history[-2][4] if len(history) >= 2 else None
+        if net_flow is not None and previous_market_cap and len(flow_rates) >= MIN_ANOMALY_HISTORY - 1:
+            flow_aum_pct = net_flow / previous_market_cap * 100
+            z = _z_score(flow_rates)
             if abs(z) >= Z_SCORE_THRESHOLD:
                 direction = "GİRİŞ 📈" if net_flow > 0 else "ÇIKIŞ 📉"
                 alert = {
@@ -65,8 +94,11 @@ def detect_anomalies(date: str = None) -> list[dict]:
                     "value": net_flow,
                     "z_score": round(z, 2),
                     "severity": _severity(abs(z)),
+                    "severity_rank": _severity_rank(abs(z)),
+                    "short_label": "PARA GİRİŞİ" if net_flow > 0 else "PARA ÇIKIŞI",
                     "label": f"Anormal Para {direction}",
-                    "detail": f"{_fmt_try(net_flow)} (Z={z:.2f})",
+                    "detail": f"{_fmt_try(net_flow)} · AUM %{flow_aum_pct:+.2f} · Z={z:.2f}",
+                    "flow_aum_pct": flow_aum_pct,
                 }
                 anomalies.append(alert)
                 log_alert(date, code, alert["alert_type"], net_flow, z, alert["detail"])
@@ -79,7 +111,9 @@ def detect_anomalies(date: str = None) -> list[dict]:
                 "alert_type": "HIGH_RETURN" if pct_change > 0 else "HIGH_LOSS",
                 "value": pct_change,
                 "z_score": round(z, 2),
-                "severity": "🔴 YÜKSEk" if abs(pct_change) >= 10 else "🟡 ORTA",
+                "severity": "🔴 KRİTİK" if abs(pct_change) >= 10 else "🟡 ORTA",
+                "severity_rank": 3 if abs(pct_change) >= 10 else 1,
+                "short_label": "YÜKSEK GETİRİ" if pct_change > 0 else "YÜKSEK KAYIP",
                 "label": f"Yüksek {'Getiri' if pct_change > 0 else 'Kayıp'}",
                 "detail": f"%{pct_change:.2f} (Z={z:.2f})",
             }
@@ -87,8 +121,10 @@ def detect_anomalies(date: str = None) -> list[dict]:
             log_alert(date, code, alert["alert_type"], pct_change, z, alert["detail"])
 
         # ─── 3. YATIRIMCI SAYISI ANOMALİSİ ──────────────────────────
-        if investor_change is not None and len(inv_changes) >= 5:
-            z = _z_score(inv_changes)
+        previous_investors = (num_investors or 0) - (investor_change or 0)
+        if investor_change is not None and previous_investors > 0 and len(investor_rates) >= MIN_ANOMALY_HISTORY:
+            investor_change_pct = investor_change / previous_investors * 100
+            z = _z_score(investor_rates)
             if abs(z) >= Z_SCORE_THRESHOLD:
                 direction = "artış 🧑‍🤝‍🧑" if investor_change > 0 else "azalış 🚶"
                 alert = {
@@ -97,12 +133,19 @@ def detect_anomalies(date: str = None) -> list[dict]:
                     "value": investor_change,
                     "z_score": round(z, 2),
                     "severity": _severity(abs(z)),
+                    "severity_rank": _severity_rank(abs(z)),
+                    "short_label": "YATIRIMCI ARTIŞI" if investor_change > 0 else "YATIRIMCI AZALIŞI",
                     "label": f"Anormal Yatırımcı {direction}",
-                    "detail": f"{investor_change:+,} kişi (Z={z:.2f})",
+                    "detail": f"{investor_change:+,} kişi · %{investor_change_pct:+.2f} · Z={z:.2f}",
+                    "investor_change_pct": investor_change_pct,
                 }
                 anomalies.append(alert)
                 log_alert(date, code, alert["alert_type"], investor_change, z, alert["detail"])
 
+    anomalies.sort(
+        key=lambda item: (int(item.get("severity_rank") or 0), abs(float(item.get("z_score") or 0))),
+        reverse=True,
+    )
     logger.info("%s tarihi için %d anomali tespit edildi.", date, len(anomalies))
     return anomalies
 
@@ -116,12 +159,20 @@ def _severity(abs_z: float) -> str:
         return "🟡 ORTA"
 
 
+def _severity_rank(abs_z: float) -> int:
+    if abs_z >= 4.0:
+        return 3
+    if abs_z >= 3.0:
+        return 2
+    return 1
+
+
 def _fmt_try(amount: float) -> str:
     """Para miktarını okunabilir formata çevirir."""
     if abs(amount) >= 1_000_000_000:
-        return f"{amount/1_000_000_000:+.2f}B ₺"
+        return f"{amount/1_000_000_000:+.2f}B TL"
     elif abs(amount) >= 1_000_000:
-        return f"{amount/1_000_000:+.2f}M ₺"
+        return f"{amount/1_000_000:+.2f}M TL"
     elif abs(amount) >= 1_000:
-        return f"{amount/1_000:+.2f}K ₺"
-    return f"{amount:+.2f} ₺"
+        return f"{amount/1_000:+.2f}K TL"
+    return f"{amount:+.2f} TL"

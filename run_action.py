@@ -15,12 +15,12 @@ from database import init_db, get_recent_data
 from fetcher import fetch_and_store
 from anomaly import detect_anomalies
 from alerts import (
-    send_anomaly_alerts,
-    send_daily_summary,
+    send_anomaly_card,
     send_latest_signal_images,
-    send_periodic_summary,
+    send_market_pulse_card,
+    send_performance_card,
+    send_rotation_card,
     send_social_momentum_image,
-    send_rotation_signal_alert,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -323,9 +323,15 @@ def run_once():
 
     if found_date:
         from signals import run_backtest, run_weekly_rotation
+        from market_notifications import (
+            build_market_pulse,
+            build_performance_continuation,
+            enrich_rotation_changes,
+            group_anomalies,
+        )
         rotation = run_weekly_rotation(found_date)
         if rotation.get("generated"):
-            asyncio.run(send_rotation_signal_alert(rotation))
+            asyncio.run(send_rotation_card(enrich_rotation_changes(rotation), limit=20))
             asyncio.run(send_latest_signal_images(limit=20))
             try:
                 backtest = run_backtest(max_dates=1000)
@@ -334,7 +340,7 @@ def run_once():
                 logger.exception("Rotasyon üretildi ancak backtest güncellenemedi")
 
         anomalies = detect_anomalies(found_date)
-        asyncio.run(send_anomaly_alerts(anomalies, found_date))
+        asyncio.run(send_anomaly_card(group_anomalies(anomalies, found_date), limit=10))
         
         logger.info("Sosyal medya ve haber trendleri analiz ediliyor...")
         # Collect names for all fund categories (YAT, BYF, EMK)
@@ -356,12 +362,9 @@ def run_once():
             logger.error("Fon isimleri güncellenemedi: %s", e)
         
         run_social_momentum_job()
-        
-        asyncio.run(send_daily_summary(found_date, names_dict))
-        
-        periodic_results = calculate_periodic_top20(found_date, c)
-        if periodic_results:
-            asyncio.run(send_periodic_summary(found_date, periodic_results))
+
+        asyncio.run(send_market_pulse_card(build_market_pulse(found_date, limit=5), limit=5))
+        asyncio.run(send_performance_card(build_performance_continuation(found_date, limit=10), limit=10))
 
 if __name__ == "__main__":
     run_once()
