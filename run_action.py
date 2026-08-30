@@ -14,7 +14,14 @@ sys.path.append(os.getcwd())
 from database import init_db, get_recent_data
 from fetcher import fetch_and_store
 from anomaly import detect_anomalies
-from alerts import send_anomaly_alerts, send_daily_summary, send_periodic_summary, send_social_pulse
+from alerts import (
+    send_anomaly_alerts,
+    send_daily_summary,
+    send_latest_signal_tables,
+    send_periodic_summary,
+    send_social_pulse,
+    send_rotation_signal_alert,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -230,8 +237,13 @@ def detect_social_trends(date_str, names_dict=None):
                     
         conn.close()
         
-        # Trendleri ürettikleri toplam skora göre büyükten küçüğe sırala (İlk 10)
-        return sorted(trends, key=lambda x: x['score'], reverse=True)[:10]
+        top_trends = sorted(trends, key=lambda x: x['score'], reverse=True)[:10]
+        try:
+            from database import save_social_trends
+            save_social_trends(date_str, top_trends)
+        except Exception as db_err:
+            logger.error("Sosyal trendler veritabanına kaydedilemedi: %s", db_err)
+        return top_trends
         
     except Exception as e:
         logger.error("Trend analizi hatası: %s", e)
@@ -265,20 +277,57 @@ def run_once():
     init_db()
     c = Crawler()
     today_dt = datetime.today()
+    from database import get_connection
+    db_conn = get_connection()
+    previous_latest = db_conn.execute("SELECT MAX(date) FROM fund_daily").fetchone()[0]
+    db_conn.close()
     found_date = None
-    for i in range(5):
+    for i in range(7):
         date_str = (today_dt - timedelta(days=i)).strftime("%Y-%m-%d")
         if fetch_and_store(date_str) > 0:
             found_date = date_str
             break
     
+    if found_date and previous_latest and found_date <= previous_latest:
+        if os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch":
+            logger.info("Manuel çalıştırma: son ana liste ve yeni fon radarı Telegram'a gönderiliyor.")
+            asyncio.run(send_latest_signal_tables(limit=20))
+        logger.info("Yeni TEFAS işlem günü yok; Telegram mesajları yinelenmeyecek (son tarih: %s).", previous_latest)
+        return
+
     if found_date:
+        from signals import run_backtest, run_weekly_rotation
+        rotation = run_weekly_rotation(found_date)
+        if rotation.get("generated"):
+            asyncio.run(send_rotation_signal_alert(rotation))
+            asyncio.run(send_latest_signal_tables(limit=20))
+            try:
+                backtest = run_backtest(max_dates=1000)
+                logger.info("Backtest güncellendi: %s dönem", backtest["metrics"]["periods"])
+            except Exception:
+                logger.exception("Rotasyon üretildi ancak backtest güncellenemedi")
+
         anomalies = detect_anomalies(found_date)
         asyncio.run(send_anomaly_alerts(anomalies, found_date))
         
         logger.info("Sosyal medya ve haber trendleri analiz ediliyor...")
-        df_today = c.fetch(start=found_date, end=found_date, kind="YAT")
-        names_dict = dict(zip(df_today['fund_code'], df_today['fund_name'])) if df_today is not None else {}
+        # Collect names for all fund categories (YAT, BYF, EMK)
+        names_dict = {}
+        for kind in ["YAT", "BYF", "EMK"]:
+            try:
+                df_kind = c.fetch(start=found_date, end=found_date, kind=kind)
+                if df_kind is not None and not df_kind.empty:
+                    cols = df_kind.columns.tolist()
+                    code_col = next((col for col in ['fund_code', 'code'] if col in cols), 'fund_code')
+                    name_col = next((col for col in ['fund_name', 'name'] if col in cols), 'fund_name')
+                    names_dict.update(dict(zip(df_kind[code_col], df_kind[name_col])))
+            except Exception as ex:
+                logger.warning("Kategori %s için isimler çekilemedi: %s", kind, ex)
+        try:
+            from database import save_fund_names
+            save_fund_names(names_dict)
+        except Exception as e:
+            logger.error("Fon isimleri güncellenemedi: %s", e)
         
         trends = detect_social_trends(found_date, names_dict)
         asyncio.run(send_social_pulse(found_date, trends))

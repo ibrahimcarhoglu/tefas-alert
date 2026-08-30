@@ -44,7 +44,7 @@ def detect_anomalies(date: str = None) -> list[dict]:
         code, price, market_cap, num_investors, net_flow, pct_change, investor_change = row
 
         # Geçmiş veriyi çek (rolling hesap için)
-        history = get_recent_data(code, days=35)
+        history = get_recent_data(code, days=35, end_date=date)
 
         if len(history) < 5:
             continue

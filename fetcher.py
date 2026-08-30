@@ -1,17 +1,19 @@
 import logging
 from datetime import datetime, timedelta
 import sqlite3
+import json
 
+import numpy as np
 import pandas as pd
 from pytefas import Crawler
 
 from config import FUND_TYPE
-from database import insert_fund_data, get_connection
+from database import insert_fund_data, get_connection, save_fund_breakdown, save_fund_names
 
 logger = logging.getLogger(__name__)
 
 
-def fetch_and_store(date: str = None):
+def fetch_and_store(date: str = None, include_breakdown: bool = True):
     """
     TEFAS'tan belirtilen tarih (varsayılan: bugün) için tüm fon verilerini çeker
     ve hesaplanan net_flow ile birlikte veritabanına kaydeder.
@@ -23,20 +25,65 @@ def fetch_and_store(date: str = None):
 
     tefas = Crawler()
 
-    # Bugün verisi
-    try:
-        df_today = tefas.fetch(
-            start=date,
-            end=date,
-            kind=FUND_TYPE
-        )
-    except Exception as e:
-        logger.error("Bugün verisi çekilemedi: %s", e)
-        raise
+    # Bugün verisi (tüm fon türleri için çekilir)
+    dfs = []
+    breakdown_list = []
 
-    if df_today is None or df_today.empty:
-        logger.warning("TEFAS'tan bugün için boş veri döndü. Piyasa kapalı olabilir.")
+    for kind in ["YAT", "BYF", "EYF"]:
+        logger.info("TEFAS'tan %s verisi çekiliyor...", kind)
+        crawler_kind = "EMK" if kind == "EYF" else kind
+        try:
+            df_kind = tefas.fetch(
+                start=date,
+                end=date,
+                kind=crawler_kind
+            )
+            if df_kind is not None and not df_kind.empty:
+                dfs.append(df_kind.dropna(axis=1, how="all"))
+        except Exception as e:
+            logger.warning("Tür %s için bugün verisi çekilemedi: %s", kind, e)
+
+        # Sinyal geçmişi doldurulurken breakdown gerekli değildir; üç ek ağ
+        # isteğini atlayarak taramayı belirgin biçimde hızlandırır.
+        if include_breakdown:
+            try:
+                df_breakdown = tefas.fetch(
+                    start=date,
+                    end=date,
+                    kind=crawler_kind,
+                    columns="breakdown"
+                )
+                if df_breakdown is not None and not df_breakdown.empty:
+                    for _, row in df_breakdown.iterrows():
+                        row_dict = row.dropna().to_dict()
+                        code = row_dict.get('fund_code')
+                        if not code:
+                            continue
+                        # Filtrele: Sadece _pct ile biten ve değeri > 0 olanları al
+                        alloc = {k: float(v) for k, v in row_dict.items() if k.endswith('_pct') and isinstance(v, (int, float)) and v > 0}
+                        if alloc:
+                            breakdown_list.append({
+                                "code": code,
+                                "allocation_json": json.dumps(alloc)
+                            })
+            except Exception as e:
+                logger.warning("Tür %s için varlık dağılımı çekilemedi: %s", kind, e)
+
+    if not dfs:
+        logger.warning("TEFAS'tan hiçbir fon türü için bugün veri dönmedi. Piyasa kapalı olabilir.")
         return 0
+
+    df_today = pd.concat(dfs, ignore_index=True)
+    if {"fund_code", "fund_name"}.issubset(df_today.columns):
+        names = (
+            df_today[["fund_code", "fund_name"]]
+            .dropna()
+            .drop_duplicates("fund_code", keep="last")
+        )
+        save_fund_names(dict(zip(names["fund_code"], names["fund_name"])))
+    if breakdown_list:
+        save_fund_breakdown(date, breakdown_list)
+        logger.info("%d adet varlık dağılımı (breakdown) kaydedildi.", len(breakdown_list))
 
     # Önceki gün verisini bul ve getir (net flow hesabı için)
     df_prev = pd.DataFrame()
@@ -64,13 +111,18 @@ def fetch_and_store(date: str = None):
             check_date = (datetime.strptime(date, "%Y-%m-%d") - timedelta(days=offset)).strftime("%Y-%m-%d")
             try:
                 logger.info("Önceki gün verisi internetten aranıyor (tarih: %s)...", check_date)
-                df_prev_fetched = tefas.fetch(
-                    start=check_date,
-                    end=check_date,
-                    kind=FUND_TYPE
-                )
-                if df_prev_fetched is not None and not df_prev_fetched.empty:
-                    df_prev = df_prev_fetched
+                prev_dfs = []
+                for kind in ["YAT", "BYF", "EYF"]:
+                    crawler_kind = "EMK" if kind == "EYF" else kind
+                    df_prev_fetched = tefas.fetch(
+                        start=check_date,
+                        end=check_date,
+                        kind=crawler_kind
+                    )
+                    if df_prev_fetched is not None and not df_prev_fetched.empty:
+                        prev_dfs.append(df_prev_fetched)
+                if prev_dfs:
+                    df_prev = pd.concat(prev_dfs, ignore_index=True)
                     logger.info("Önceki gün verisi internetten başarıyla çekildi (tarih: %s)", check_date)
                     break
             except Exception as e:
@@ -95,6 +147,14 @@ def fetch_and_store(date: str = None):
             "shares_outstanding": "num_shares",
         })
 
+    # Her fon için DataFrame'i tekrar tekrar filtrelemek binlerce fonluk günde
+    # O(n²) maliyet yaratıyordu. Kod bazlı sözlük günlük eşleştirmeyi O(n) yapar.
+    prev_lookup = (
+        df_prev.drop_duplicates("code", keep="last").set_index("code").to_dict("index")
+        if not df_prev.empty and "code" in df_prev.columns
+        else {}
+    )
+
     records = []
 
     for _, row in df_today.iterrows():
@@ -109,10 +169,9 @@ def fetch_and_store(date: str = None):
         pct_change = None
         investor_change = None
 
-        if not df_prev.empty:
-            prev_row = df_prev[df_prev["code"] == code]
-            if not prev_row.empty:
-                prev_row = prev_row.iloc[0]
+        if prev_lookup:
+            prev_row = prev_lookup.get(code)
+            if prev_row is not None:
                 price_prev = prev_row.get("price") or 0
                 market_cap_prev = prev_row.get("market_cap") or 0
                 num_investors_prev = int(prev_row.get("num_investors") or 0)
@@ -178,3 +237,85 @@ def fetch_historical(start: str, end: str):
     logger.info("Geçmiş veri yükleme tamamlandı. Toplam: %d kayıt", total)
     return total
 
+
+def fetch_range_and_store(start: str, end: str) -> int:
+    """Bir tarih aralığını toplu çekip günlük değişkenleri vektörel hesaplar.
+
+    Sinyal tarayıcısının eksik tarihleri tamamlaması için optimize edilmiştir;
+    varlık dağılımı çekmez ve genel web katmanına bağımlı değildir.
+    """
+    logger.info("TEFAS toplu veri çekimi: %s -> %s", start, end)
+    crawler = Crawler()
+    frames = []
+    for kind in ("YAT", "BYF", "EMK"):
+        try:
+            frame = crawler.fetch(start=start, end=end, kind=kind)
+            if frame is not None and not frame.empty:
+                frames.append(frame.dropna(axis=1, how="all"))
+        except Exception as exc:
+            logger.warning("Tür %s için toplu veri çekilemedi: %s", kind, exc)
+    if not frames:
+        return 0
+
+    data = pd.concat(frames, ignore_index=True)
+    if {"fund_code", "fund_name"}.issubset(data.columns):
+        names = data[["fund_code", "fund_name"]].dropna().drop_duplicates("fund_code", keep="last")
+        save_fund_names(dict(zip(names["fund_code"], names["fund_name"])))
+
+    data = data.rename(columns={
+        "fund_code": "code",
+        "portfolio_size": "market_cap",
+        "investor_count": "num_investors",
+        "shares_outstanding": "num_shares",
+    })
+    required = ["date", "code", "price", "market_cap", "num_investors", "num_shares"]
+    missing = [column for column in required if column not in data.columns]
+    if missing:
+        raise ValueError(f"TEFAS toplu yanıtında gerekli kolonlar eksik: {missing}")
+    data = data[required].copy()
+    data["date"] = pd.to_datetime(data["date"]).dt.strftime("%Y-%m-%d")
+    data = data.dropna(subset=["date", "code"]).drop_duplicates(["date", "code"], keep="last")
+    for column in ("price", "market_cap", "num_investors", "num_shares"):
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data["_new"] = True
+
+    conn = get_connection()
+    previous = pd.read_sql_query(
+        """
+        SELECT fd.date, fd.code, fd.price, fd.market_cap, fd.num_investors, fd.num_shares
+        FROM fund_daily fd
+        JOIN (
+            SELECT code, MAX(date) AS previous_date
+            FROM fund_daily WHERE date < ? GROUP BY code
+        ) p ON p.code = fd.code AND p.previous_date = fd.date
+        """,
+        conn,
+        params=(start,),
+    )
+    conn.close()
+    if not previous.empty:
+        previous["_new"] = False
+        combined = pd.concat([previous, data], ignore_index=True)
+    else:
+        combined = data.copy()
+    combined = combined.sort_values(["code", "date"])
+
+    groups = combined.groupby("code", observed=True)
+    previous_price = groups["price"].shift(1)
+    previous_market_cap = groups["market_cap"].shift(1)
+    previous_investors = groups["num_investors"].shift(1)
+    valid_previous = (previous_price > 0) & (previous_market_cap > 0)
+    price_return = combined["price"] / previous_price - 1
+    combined["pct_change"] = np.where(valid_previous, price_return * 100, np.nan)
+    combined["net_flow"] = np.where(
+        valid_previous,
+        combined["market_cap"] - previous_market_cap - previous_market_cap * price_return,
+        np.nan,
+    )
+    combined["investor_change"] = combined["num_investors"] - previous_investors
+
+    output = combined[combined["_new"]].drop(columns="_new")
+    records = output.where(pd.notna(output), None).to_dict("records")
+    insert_fund_data(records)
+    logger.info("Toplu TEFAS güncellemesi tamamlandı: %d kayıt", len(records))
+    return len(records)

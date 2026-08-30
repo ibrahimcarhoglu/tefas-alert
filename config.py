@@ -13,10 +13,13 @@ DAILY_RETURN_THRESHOLD = float(os.getenv("DAILY_RETURN_THRESHOLD", "5.0"))
 MARKET_CAP_CHANGE_THRESHOLD = float(os.getenv("MARKET_CAP_CHANGE_THRESHOLD", "10.0"))
 
 # Zamanlama
-FETCH_TIME = os.getenv("FETCH_TIME", "10:30")
+FETCH_TIME = os.getenv("FETCH_TIME", "20:30")
 
 # Fon türü
 FUND_TYPE = os.getenv("FUND_TYPE", "YAT")
 
 # Veritabanı
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tefas.db")
+DB_PATH = os.getenv(
+    "TEFAS_DB_PATH",
+    os.path.join(os.path.dirname(__file__), "data", "tefas.db"),
+)

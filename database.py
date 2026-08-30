@@ -8,13 +8,18 @@ logger = logging.getLogger(__name__)
 
 def get_connection():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    return conn
 
 
 def init_db():
     """Veritabanını ve tabloları oluşturur."""
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode = WAL")
+    cursor.execute("PRAGMA synchronous = NORMAL")
 
     cursor.executescript("""
         CREATE TABLE IF NOT EXISTS fund_daily (
@@ -61,6 +66,15 @@ def init_db():
             management_fee REAL
         );
 
+        CREATE TABLE IF NOT EXISTS fund_platform_metadata (
+            code TEXT PRIMARY KEY,
+            founder TEXT,
+            tefas_status TEXT,
+            tefas_risk_value INTEGER,
+            source TEXT NOT NULL DEFAULT 'tefas_official_profile',
+            checked_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
         CREATE TABLE IF NOT EXISTS fund_breakdown (
             date       TEXT NOT NULL,
             code       TEXT NOT NULL,
@@ -89,10 +103,125 @@ def init_db():
             created_at   TEXT DEFAULT (datetime('now','localtime'))
         );
 
+        CREATE TABLE IF NOT EXISTS signal_runs (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_date      TEXT NOT NULL,
+            strategy_version TEXT NOT NULL,
+            status           TEXT NOT NULL,
+            universe_count   INTEGER NOT NULL DEFAULT 0,
+            selected_count   INTEGER NOT NULL DEFAULT 0,
+            config_json      TEXT NOT NULL,
+            diagnostics_json TEXT,
+            created_at       TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(signal_date, strategy_version)
+        );
+
+        CREATE TABLE IF NOT EXISTS fund_features_daily (
+            signal_date       TEXT NOT NULL,
+            code              TEXT NOT NULL,
+            strategy_version  TEXT NOT NULL,
+            category          TEXT NOT NULL,
+            score             REAL NOT NULL,
+            momentum_score    REAL,
+            trend_score       REAL,
+            risk_score        REAL,
+            flow_score        REAL,
+            regime_score      REAL,
+            liquidity_score   REAL,
+            return_1m         REAL,
+            return_3m         REAL,
+            return_6m         REAL,
+            return_1y         REAL,
+            volatility_annual REAL,
+            drawdown_6m       REAL,
+            flow_zscore       REAL,
+            flow_5d_ratio     REAL,
+            flow_20d_ratio    REAL,
+            flow_persistence  REAL,
+            investor_growth   REAL,
+            ema50             REAL,
+            ema200            REAL,
+            market_cap        REAL,
+            num_investors     INTEGER,
+            alis_valor        INTEGER,
+            satis_valor       INTEGER,
+            data_quality      INTEGER NOT NULL DEFAULT 1,
+            details_json      TEXT,
+            created_at        TEXT DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY(signal_date, code, strategy_version)
+        );
+
+        CREATE TABLE IF NOT EXISTS fund_signals (
+            signal_date       TEXT NOT NULL,
+            code              TEXT NOT NULL,
+            strategy_version  TEXT NOT NULL,
+            status            TEXT NOT NULL,
+            previous_status   TEXT,
+            score             REAL NOT NULL,
+            rank              INTEGER,
+            target_weight     REAL NOT NULL DEFAULT 0,
+            reasons_json      TEXT NOT NULL,
+            entry_window      TEXT,
+            invalidation_rule TEXT,
+            created_at        TEXT DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY(signal_date, code, strategy_version)
+        );
+
+        CREATE TABLE IF NOT EXISTS rotation_recommendations (
+            signal_date      TEXT NOT NULL,
+            code             TEXT NOT NULL,
+            strategy_version TEXT NOT NULL,
+            action           TEXT NOT NULL,
+            rank             INTEGER,
+            score            REAL NOT NULL,
+            target_weight    REAL NOT NULL DEFAULT 0,
+            category         TEXT NOT NULL,
+            reasons_json     TEXT NOT NULL,
+            created_at       TEXT DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY(signal_date, code, strategy_version)
+        );
+
+        CREATE TABLE IF NOT EXISTS emerging_fund_radar (
+            signal_date          TEXT NOT NULL,
+            code                 TEXT NOT NULL,
+            strategy_version     TEXT NOT NULL,
+            tier                 TEXT NOT NULL,
+            signal               TEXT NOT NULL,
+            rank                 INTEGER NOT NULL,
+            score                REAL NOT NULL,
+            confidence           REAL NOT NULL,
+            history_days         INTEGER NOT NULL,
+            momentum_score       REAL,
+            trend_score          REAL,
+            flow_score           REAL,
+            risk_liquidity_score REAL,
+            reasons_json         TEXT NOT NULL DEFAULT '[]',
+            created_at           TEXT DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY(signal_date, code, strategy_version)
+        );
+
+        CREATE TABLE IF NOT EXISTS strategy_backtests (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_version TEXT NOT NULL,
+            start_date       TEXT NOT NULL,
+            end_date         TEXT NOT NULL,
+            config_json      TEXT NOT NULL,
+            metrics_json     TEXT NOT NULL,
+            equity_curve_json TEXT NOT NULL,
+            created_at       TEXT DEFAULT (datetime('now','localtime'))
+        );
+
         CREATE INDEX IF NOT EXISTS idx_fund_daily_date ON fund_daily(date);
         CREATE INDEX IF NOT EXISTS idx_fund_daily_code ON fund_daily(code);
+        CREATE INDEX IF NOT EXISTS idx_fund_daily_code_date ON fund_daily(code, date);
+        CREATE INDEX IF NOT EXISTS idx_fund_daily_date_net_flow ON fund_daily(date, net_flow);
+        CREATE INDEX IF NOT EXISTS idx_fund_daily_date_pct_change ON fund_daily(date, pct_change);
         CREATE INDEX IF NOT EXISTS idx_portfolio_session_id ON portfolio_transactions(session_id);
         CREATE INDEX IF NOT EXISTS idx_price_alert_session ON price_alert_rules(session_id);
+        CREATE INDEX IF NOT EXISTS idx_fund_features_date_score ON fund_features_daily(signal_date, score DESC);
+        CREATE INDEX IF NOT EXISTS idx_fund_signals_date_status ON fund_signals(signal_date, status, score DESC);
+        CREATE INDEX IF NOT EXISTS idx_rotation_date_action ON rotation_recommendations(signal_date, action);
+        CREATE INDEX IF NOT EXISTS idx_emerging_radar_date_rank ON emerging_fund_radar(signal_date, rank);
     """)
 
     # Mevcut kurulumlar için management_fee sütunu
@@ -101,6 +230,19 @@ def init_db():
         conn.commit()
     except sqlite3.OperationalError:
         pass
+
+    try:
+        cursor.execute("ALTER TABLE fund_platform_metadata ADD COLUMN tefas_risk_value INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+    for column in ("flow_5d_ratio", "flow_20d_ratio", "flow_persistence"):
+        try:
+            cursor.execute(f"ALTER TABLE fund_features_daily ADD COLUMN {column} REAL")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
 
     conn.commit()
     conn.close()
@@ -151,17 +293,21 @@ def insert_fund_data(records: list[dict]):
     logger.info("%d fon kaydı veritabanına yazıldı.", len(records))
 
 
-def get_recent_data(code: str, days: int = 35):
-    """Belirli bir fon için son N günün verisini getirir."""
+def get_recent_data(code: str, days: int = 35, end_date: str | None = None):
+    """Belirli bir fonun end_date dahil son N kaydını kronolojik döndürür."""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT date, net_flow, pct_change, investor_change, market_cap, num_investors
-        FROM fund_daily
-        WHERE code = ?
-        ORDER BY date DESC
-        LIMIT ?
-    """, (code, days))
+        FROM (
+            SELECT date, net_flow, pct_change, investor_change, market_cap, num_investors
+            FROM fund_daily
+            WHERE code = ? AND (? IS NULL OR date <= ?)
+            ORDER BY date DESC
+            LIMIT ?
+        )
+        ORDER BY date ASC
+    """, (code, end_date, end_date, days))
     rows = cursor.fetchall()
     conn.close()
     return rows

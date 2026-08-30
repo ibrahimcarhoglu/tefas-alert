@@ -2,12 +2,12 @@ name: Daily TEFAS Alert
 
 on:
   schedule:
-    # Her gün Türkiye saatiyle 10:30 (UTC 07:30)
-    - cron: '30 7 * * *'
+    # TEFAS günlük verisi yayımlandıktan sonra, Türkiye saatiyle 21:30.
+    - cron: '30 18 * * *'
   workflow_dispatch: # Manuel tetikleme için
 
 permissions:
-  contents: write # Veritabanını geri push edebilmesi için gerekli
+  contents: read
 
 env:
   # Node.js 20 deprecation uyarısını gidermek ve Node 24 kullanmak için
@@ -32,25 +32,38 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Restore latest database snapshot
+        id: restore-db
+        uses: actions/cache/restore@v4
+        with:
+          path: data/tefas.db
+          key: tefas-db-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            tefas-db-${{ runner.os }}-
+
       - name: Run Daily Alert Job
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
           Z_SCORE_THRESHOLD: 2.5
           DAILY_RETURN_THRESHOLD: 5.0
           FUND_TYPE: YAT
         run: |
           python run_action.py
 
-      - name: Commit and Push Database Changes
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add data/tefas.db
-          # Değişiklik varsa commit yap, yoksa hata verme
-          git commit -m "chore: update database [skip ci]" || exit 0
-          
-          # Push denemesi ve çakışma durumunda rebase/retry
-          for i in {1..5}; do
-            git push origin main && break || (git pull --rebase origin main && sleep 5)
-          done
+      - name: Save database snapshot for the next run
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/tefas.db
+          key: tefas-db-${{ runner.os }}-${{ github.run_id }}
+
+      - name: Publish database snapshot artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tefas-db-${{ github.run_number }}
+          path: data/tefas.db
+          retention-days: 7
+          if-no-files-found: error
