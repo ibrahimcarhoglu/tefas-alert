@@ -60,6 +60,29 @@ def init_db():
             UNIQUE(date, code)
         );
 
+        CREATE TABLE IF NOT EXISTS social_momentum_daily (
+            scan_date          TEXT NOT NULL,
+            as_of_date         TEXT NOT NULL,
+            code               TEXT NOT NULL,
+            label              TEXT NOT NULL,
+            rank               INTEGER,
+            score              REAL NOT NULL,
+            mention_count      INTEGER NOT NULL DEFAULT 0,
+            unique_accounts    INTEGER NOT NULL DEFAULT 0,
+            positive_count     INTEGER NOT NULL DEFAULT 0,
+            negative_count     INTEGER NOT NULL DEFAULT 0,
+            hype_count         INTEGER NOT NULL DEFAULT 0,
+            acceleration_score REAL,
+            diversity_score    REAL,
+            sentiment_score    REAL,
+            confirmation_score REAL,
+            technical_score    REAL,
+            flow_score         REAL,
+            details_json       TEXT NOT NULL DEFAULT '{}',
+            created_at         TEXT DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY(scan_date, code)
+        );
+
         CREATE TABLE IF NOT EXISTS fund_names (
             code TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -222,6 +245,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_fund_signals_date_status ON fund_signals(signal_date, status, score DESC);
         CREATE INDEX IF NOT EXISTS idx_rotation_date_action ON rotation_recommendations(signal_date, action);
         CREATE INDEX IF NOT EXISTS idx_emerging_radar_date_rank ON emerging_fund_radar(signal_date, rank);
+        CREATE INDEX IF NOT EXISTS idx_social_momentum_date_rank ON social_momentum_daily(scan_date, rank);
     """)
 
     # Mevcut kurulumlar için management_fee sütunu
@@ -447,6 +471,73 @@ def save_social_trends(date: str, trends: list[dict]):
     conn.commit()
     conn.close()
     logger.info("%d sosyal trend kaydı veritabanına yazıldı.", len(records))
+
+
+def save_social_momentum(scan_date: str, as_of_date: str, rows: list[dict]):
+    """Açıklanabilir günlük sosyal-momentum bileşenlerini saklar."""
+    if not rows:
+        return
+    import json
+
+    records = []
+    for row in rows:
+        records.append({
+            "scan_date": scan_date,
+            "as_of_date": as_of_date,
+            "code": str(row["code"]),
+            "label": str(row.get("label") or "İZLE"),
+            "rank": int(row.get("rank") or 0),
+            "score": float(row.get("score") or 0),
+            "mention_count": int(row.get("mention_count") or 0),
+            "unique_accounts": int(row.get("unique_accounts") or 0),
+            "positive_count": int(row.get("positive_count") or 0),
+            "negative_count": int(row.get("negative_count") or 0),
+            "hype_count": int(row.get("hype_count") or 0),
+            "acceleration_score": float(row.get("acceleration_score") or 0),
+            "diversity_score": float(row.get("diversity_score") or 0),
+            "sentiment_score": float(row.get("sentiment_score") or 0),
+            "confirmation_score": float(row.get("confirmation_score") or 0),
+            "technical_score": float(row.get("technical_score") or 0),
+            "flow_score": float(row.get("flow_score") or 0),
+            "details_json": json.dumps({
+                "reason": row.get("reason"),
+                "examples": row.get("examples") or [],
+                "category": row.get("category"),
+            }, ensure_ascii=False),
+        })
+
+    conn = get_connection()
+    conn.execute("DELETE FROM social_momentum_daily WHERE scan_date = ?", (scan_date,))
+    conn.executemany(
+        """
+        INSERT INTO social_momentum_daily (
+            scan_date, as_of_date, code, label, rank, score, mention_count,
+            unique_accounts, positive_count, negative_count, hype_count,
+            acceleration_score, diversity_score, sentiment_score,
+            confirmation_score, technical_score, flow_score, details_json
+        ) VALUES (
+            :scan_date, :as_of_date, :code, :label, :rank, :score, :mention_count,
+            :unique_accounts, :positive_count, :negative_count, :hype_count,
+            :acceleration_score, :diversity_score, :sentiment_score,
+            :confirmation_score, :technical_score, :flow_score, :details_json
+        )
+        ON CONFLICT(scan_date, code) DO UPDATE SET
+            as_of_date=excluded.as_of_date, label=excluded.label, rank=excluded.rank,
+            score=excluded.score, mention_count=excluded.mention_count,
+            unique_accounts=excluded.unique_accounts, positive_count=excluded.positive_count,
+            negative_count=excluded.negative_count, hype_count=excluded.hype_count,
+            acceleration_score=excluded.acceleration_score,
+            diversity_score=excluded.diversity_score,
+            sentiment_score=excluded.sentiment_score,
+            confirmation_score=excluded.confirmation_score,
+            technical_score=excluded.technical_score, flow_score=excluded.flow_score,
+            details_json=excluded.details_json, created_at=datetime('now','localtime')
+        """,
+        records,
+    )
+    conn.commit()
+    conn.close()
+    logger.info("%d sosyal momentum kaydı veritabanına yazıldı.", len(records))
 
 def save_fund_breakdown(date: str, data_list: list):
     """

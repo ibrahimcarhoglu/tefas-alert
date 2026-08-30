@@ -169,6 +169,42 @@ async def send_social_pulse(date_str: str, trending_funds: list[dict]):
     lines.append("⚠️ <i>Geçmiş performans gelecek getirinin garantisi değildir.</i>")
     await _send_message("\n".join(lines))
 
+
+async def send_social_momentum_image(payload: dict, limit: int = 10) -> None:
+    """Günlük sosyal momentum radarını mobil uyumlu PNG kart olarak gönder."""
+    try:
+        from signal_cards import render_social_momentum_card
+
+        rows = (payload or {}).get("radar") or []
+        scan_date = str((payload or {}).get("scan_date") or "—")
+        as_of_date = str((payload or {}).get("as_of_date") or "—")
+        source_note = "X taraması aktif" if (payload or {}).get("source_available") else "X kaynağına erişilemedi"
+        caption = (
+            "🔥 <b>SOSYAL MOMENTUM RADARI</b>\n"
+            f"📅 X: {html.escape(scan_date)} · TEFAS: {html.escape(as_of_date)}\n"
+            f"ℹ️ {html.escape(source_note)} · Ana AL/TUT/SAT skorundan bağımsız\n"
+            f"🔗 {_caption_links(rows, limit)}"
+        )
+        await _send_photo_bytes(
+            render_social_momentum_card(payload, limit=limit),
+            f"tefas-sosyal-{scan_date}.png",
+            caption,
+        )
+    except Exception:
+        logger.exception("Sosyal momentum görseli üretilemedi; kısa metne dönülüyor")
+        fallback = [
+            "🔥 <b>SOSYAL MOMENTUM RADARI</b>",
+            f"📅 {html.escape(str((payload or {}).get('scan_date') or '—'))}",
+        ]
+        for item in ((payload or {}).get("radar") or [])[:limit]:
+            code = html.escape(str(item.get("code") or ""))
+            fallback.append(
+                f"<b>{int(item.get('rank') or 0):02d}. {code}</b> · "
+                f"{html.escape(str(item.get('label') or 'İZLE'))} · {_score(item.get('score'))}"
+            )
+        fallback.append("⚠️ <i>Sosyal veri ana işlem sinyalini değiştirmez.</i>")
+        await _send_message("\n".join(fallback))
+
 async def send_periodic_summary(date_str: str, periodic_results: dict):
     for label, df in periodic_results.items():
         lines = [

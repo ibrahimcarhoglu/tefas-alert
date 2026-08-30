@@ -19,7 +19,7 @@ from alerts import (
     send_daily_summary,
     send_latest_signal_images,
     send_periodic_summary,
-    send_social_pulse,
+    send_social_momentum_image,
     send_rotation_signal_alert,
 )
 
@@ -273,6 +273,21 @@ def calculate_periodic_top20(latest_date_str, c):
                 break
     return results
 
+
+def run_social_momentum_job() -> dict:
+    """Günlük sosyal radarı üret; haftalık işlem modeline hiçbir puan yazma."""
+    from social_momentum import build_social_momentum_radar
+
+    logger.info("Günlük Sosyal Momentum Radarı hazırlanıyor...")
+    payload = build_social_momentum_radar(limit=10)
+    asyncio.run(send_social_momentum_image(payload, limit=10))
+    logger.info(
+        "Sosyal radar gönderildi: %d kayıt, X kaynağı=%s",
+        len(payload.get("radar") or []),
+        "aktif" if payload.get("source_available") else "erişilemedi",
+    )
+    return payload
+
 def run_once():
     init_db()
     c = Crawler()
@@ -287,12 +302,23 @@ def run_once():
         if fetch_and_store(date_str) > 0:
             found_date = date_str
             break
+
+    if not found_date:
+        if previous_latest:
+            logger.warning("Yeni TEFAS verisi çekilemedi; sosyal radar son teknik veriyle çalışacak.")
+            run_social_momentum_job()
+        else:
+            logger.error("TEFAS verisi bulunamadı; sosyal radar için teknik teyit üretilemedi.")
+        return
     
     if found_date and previous_latest and found_date <= previous_latest:
         if os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch":
             logger.info("Manuel çalıştırma: son ana liste ve yeni fon radarı Telegram'a gönderiliyor.")
             asyncio.run(send_latest_signal_images(limit=20))
-        logger.info("Yeni TEFAS işlem günü yok; Telegram mesajları yinelenmeyecek (son tarih: %s).", previous_latest)
+        # Sosyal ilgi hafta sonu veya yeni TEFAS verisi olmayan günlerde de değişebilir.
+        # Bu nedenle yalnızca sosyal radar günlük üretilir; ana sinyal yinelenmez.
+        run_social_momentum_job()
+        logger.info("Yeni TEFAS işlem günü yok; ana sinyaller yinelenmedi (son tarih: %s).", previous_latest)
         return
 
     if found_date:
@@ -329,8 +355,7 @@ def run_once():
         except Exception as e:
             logger.error("Fon isimleri güncellenemedi: %s", e)
         
-        trends = detect_social_trends(found_date, names_dict)
-        asyncio.run(send_social_pulse(found_date, trends))
+        run_social_momentum_job()
         
         asyncio.run(send_daily_summary(found_date, names_dict))
         

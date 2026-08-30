@@ -115,6 +115,28 @@ def _signal_color(value: Any) -> str:
     return COLORS["gray"]
 
 
+def _social_label_color(value: Any) -> str:
+    label = str(value or "").upper()
+    if "TEYİTLİ" in label:
+        return COLORS["green"]
+    if "SESSİZ" in label:
+        return COLORS["purple"]
+    if "ERKEN" in label:
+        return COLORS["blue"]
+    if "HYPE" in label:
+        return COLORS["orange"]
+    return COLORS["gray"]
+
+
+def _social_label(value: Any) -> str:
+    return {
+        "TEYİTLİ İLGİ": "TEYİTLİ İLGİ",
+        "SESSİZ YÜKSELİŞ": "SESSİZ YÜK.",
+        "ERKEN RADAR": "ERKEN RADAR",
+        "AŞIRI HYPE": "AŞIRI HYPE",
+    }.get(str(value or "").upper(), str(value or "İZLE"))
+
+
 def _fit(draw: ImageDraw.ImageDraw, text: Any, font, max_width: int) -> str:
     value = re.sub(r"\s+", " ", str(text or "—")).strip()
     if draw.textlength(value, font=font) <= max_width:
@@ -259,4 +281,61 @@ def render_emerging_card(payload: dict[str, Any], limit: int = 20) -> bytes:
         _draw_text(draw, (x0 + 1155, y + 55), f"{category} • {platform}", FONTS["small"], platform_color, 278)
         y += ROW_HEIGHT
     _footer(draw, image, date_text)
+    return _save(image)
+
+
+def render_social_momentum_card(payload: dict[str, Any], limit: int = 10) -> bytes:
+    rows = list((payload or {}).get("radar") or [])[:limit]
+    scan_date = str((payload or {}).get("scan_date") or "—")
+    as_of_date = str((payload or {}).get("as_of_date") or "—")
+    source_available = bool((payload or {}).get("source_available"))
+    subtitle = (
+        "X ilgisi + teknik trend + TEFAS akışı  •  Ana AL/TUT/SAT skorundan bağımsız"
+        if source_available else
+        "X veri kaynağına erişilemedi  •  Ana AL/TUT/SAT skoru etkilenmedi"
+    )
+    image, draw = _base_image("SOSYAL MOMENTUM RADARI", subtitle, scan_date, max(1, len(rows)))
+    x0 = MARGIN + 26
+    columns = [
+        ("#", x0, 42), ("FON", x0 + 52, 82), ("RADAR", x0 + 145, 205),
+        ("SKOR", x0 + 360, 72), ("HIZ", x0 + 442, 72),
+        ("X / KAY.", x0 + 524, 120), ("DUYGU", x0 + 654, 86),
+        ("TEYİT", x0 + 750, 82), ("TEK. / AKIŞ", x0 + 842, 146),
+        ("YAT.%", x0 + 998, 104), ("NEDEN", x0 + 1112, 325),
+    ]
+    y = MARGIN + HEADER_HEIGHT
+    _column_header(draw, y, columns)
+    y += COLUMN_HEIGHT
+    if not rows:
+        message = "Bugün gösterilecek doğrulanmış sosyal momentum kaydı bulunamadı."
+        draw.text((x0 + 20, y + 30), message, font=FONTS["cell"], fill=COLORS["muted"])
+    for index, item in enumerate(rows):
+        _row_background(draw, y, index)
+        baseline = y + 31
+        draw.text((x0, baseline), f"{int(item.get('rank') or index + 1):02d}", font=FONTS["cell"], fill=COLORS["muted"])
+        draw.text((x0 + 52, baseline), str(item.get("code") or ""), font=FONTS["cell_bold"], fill=COLORS["cyan"])
+        label = str(item.get("label") or "İZLE")
+        label_color = _social_label_color(label)
+        draw.ellipse((x0 + 145, baseline + 6, x0 + 163, baseline + 24), fill=label_color)
+        _draw_text(draw, (x0 + 172, baseline), _social_label(label), FONTS["small"], label_color, 172)
+        draw.text((x0 + 360, baseline), _num(item.get("score"), 1), font=FONTS["cell_bold"], fill=COLORS["text"])
+        draw.text((x0 + 442, baseline), _num(item.get("acceleration_score"), 0), font=FONTS["cell"], fill=COLORS["text"])
+        mentions = int(item.get("mention_count") or 0)
+        accounts = int(item.get("unique_accounts") or 0)
+        draw.text((x0 + 524, baseline), f"{mentions} / {accounts}", font=FONTS["cell"], fill=COLORS["text"])
+        sentiment = float(item.get("sentiment_score") or 0)
+        sentiment_color = COLORS["green"] if sentiment >= 60 else COLORS["red"] if sentiment < 40 else COLORS["text"]
+        draw.text((x0 + 654, baseline), _num(sentiment, 0), font=FONTS["cell"], fill=sentiment_color)
+        draw.text((x0 + 750, baseline), _num(item.get("confirmation_score"), 0), font=FONTS["cell"], fill=COLORS["text"])
+        technical_flow = f"{_num(item.get('technical_score'), 0)} / {_num(item.get('flow_score'), 0)}"
+        _draw_text(draw, (x0 + 842, baseline), technical_flow, FONTS["small"], COLORS["text"], 140)
+        draw.text((x0 + 998, baseline), _pct(item.get("investor_growth")), font=FONTS["small"], fill=COLORS["text"])
+        _draw_text(draw, (x0 + 1112, y + 18), item.get("reason"), FONTS["tiny"], COLORS["text"], 320)
+        _draw_text(
+            draw, (x0 + 1112, y + 55),
+            f"{item.get('category') or '—'} • {item.get('tefas_status') or '—'}",
+            FONTS["tiny"], COLORS["muted"], 320,
+        )
+        y += ROW_HEIGHT
+    _footer(draw, image, f"TEFAS {as_of_date} • X {scan_date}")
     return _save(image)
