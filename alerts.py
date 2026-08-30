@@ -250,7 +250,8 @@ def _pct(value) -> str:
     if value is None:
         return "—"
     try:
-        return f"{float(value):+.1f}%"
+        # Sinyal motoru getirileri 0.159 = %15,9 biçiminde oran olarak saklar.
+        return f"{float(value) * 100:+.1f}%"
     except (TypeError, ValueError):
         return "—"
 
@@ -267,6 +268,21 @@ def _short(value, limit: int) -> str:
     return html.escape(text if len(text) <= limit else text[: limit - 1] + "…")
 
 
+def _compact_founder(value) -> str:
+    """Mobil mesajda şirketin hukuki eklerini kaldırarak kurucuyu okunur tut."""
+    text = re.sub(r"\s+", " ", str(value or "BİLİNMİYOR")).strip()
+    for suffix in (
+        " PORTFÖY YÖNETİMİ A.Ş.",
+        " EMEKLİLİK VE HAYAT A.Ş.",
+        " HAYAT VE EMEKLİLİK A.Ş.",
+        " EMEKLİLİK A.Ş.",
+    ):
+        if text.upper().endswith(suffix):
+            text = text[: -len(suffix)].strip()
+            break
+    return _short(text, 20)
+
+
 def _telegram_visible_length(value: str) -> int:
     """Telegram sınırı HTML işaretleri çözüldükten sonraki görünen metne uygulanır."""
     without_tags = re.sub(r"<[^>]*>", "", value)
@@ -275,11 +291,13 @@ def _telegram_visible_length(value: str) -> int:
 
 def _tefas_label(value) -> str:
     status = str(value or "BİLİNMİYOR").upper()
-    if "AÇIK" in status or "ACIK" in status:
-        return "🟢 AÇIK"
-    if "KAPALI" in status:
-        return "🔴 KAPALI"
-    return f"⚪ {_short(status, 14)}"
+    if "BEFAS" in status:
+        return "🟣 BEFAS"
+    if "KAPALI" in status or "DIŞI" in status or "GÖRMÜYOR" in status:
+        return "⚫ DIŞARIDA"
+    if "AÇIK" in status or "ACIK" in status or "GÖRÜYOR" in status:
+        return "🟢 TEFAS"
+    return "⚪ BELİRSİZ"
 
 
 async def _send_table(title: str, date_str: str, rows: list[str], empty_text: str) -> None:
@@ -322,7 +340,7 @@ def _signal_icon(signal) -> str:
     if "GÜÇLÜ AL" in label:
         return "🟢"
     if label == "AL" or "POTANSİYEL" in label:
-        return "🟩"
+        return "🟢"
     if label == "TUT" or "İZLE" in label:
         return "🔵"
     if "GÜÇLÜ SAT" in label:
@@ -346,16 +364,16 @@ async def send_main_signal_table(payload: dict, limit: int = 20) -> None:
         rows.append(
             "\n".join([
                 f"<b>{int(item.get('rank') or len(rows) + 1):02d}  "
-                f"<a href='{url}'>{code}</a></b>   {icon} <b>{signal}</b>   <b>{_score(item.get('opportunity_score'))}</b>",
-                f"M {_score(item.get('momentum_score'))}  •  Trend {_score(item.get('trend_score'))}  •  "
+                f"<a href='{url}'>{code}</a></b>  {icon} <b>{signal}</b>  •  Skor <b>{_score(item.get('opportunity_score'))}</b>",
+                f"M {_score(item.get('momentum_score'))}  •  T {_score(item.get('trend_score'))}  │  "
                 f"1A {_pct(item.get('return_1m'))}  •  3A {_pct(item.get('return_3m'))}",
-                f"6A {_pct(item.get('return_6m'))}  •  1Y {_pct(item.get('return_1y'))}  •  "
-                f"Risk {risk_text} {_short(item.get('risk_band'), 12)}",
-                f"🏢 {_short(item.get('founder'), 26)}  •  {_short(item.get('category'), 20)}  •  {_tefas_label(item.get('tefas_status'))}",
+                f"6A {_pct(item.get('return_6m'))}  •  1Y {_pct(item.get('return_1y'))}  │  "
+                f"R {risk_text} {_short(item.get('risk_band'), 10)}",
+                f"{_compact_founder(item.get('founder'))}  /  {_short(item.get('category'), 16)}  •  {_tefas_label(item.get('tefas_status'))}",
             ])
         )
     await _send_table(
-        "🏆 <b>ANA SİNYAL LİSTESİ</b>  ·  İlk 20",
+        "🏆 <b>ANA SİNYAL LİSTESİ</b> · İlk 20\n<i>M: momentum  •  T: trend</i>",
         (payload or {}).get("signal_date"),
         rows,
         "Ana listede gösterilecek fon bulunamadı.",
@@ -375,18 +393,16 @@ async def send_emerging_signal_table(payload: dict, limit: int = 20) -> None:
         rows.append(
             "\n".join([
                 f"<b>{int(item.get('rank') or len(rows) + 1):02d}  "
-                f"<a href='{url}'>{code}</a></b>   {icon} <b>{_short(item.get('signal'), 20)}</b>   <b>{_score(item.get('score'))}</b>",
-                f"{_short(item.get('tier'), 10)}  •  {int(item.get('history_days') or 0)} gün  •  "
-                f"Güven {_score(item.get('confidence'))}",
-                f"M {_score(item.get('momentum_score'))}  •  Trend {_score(item.get('trend_score'))}  •  "
-                f"Akış {_score(item.get('flow_score'))}",
-                f"1A {_pct(item.get('return_1m'))}  •  3A {_pct(item.get('return_3m'))}  •  "
-                f"Risk {risk_text} {_short(item.get('risk_band'), 12)}",
-                f"🏢 {_short(item.get('founder'), 26)}  •  {_short(item.get('category'), 20)}  •  {_tefas_label(item.get('tefas_status'))}",
+                f"<a href='{url}'>{code}</a></b>  {icon} <b>{_short(item.get('signal'), 20)}</b>  •  Skor <b>{_score(item.get('score'))}</b>",
+                f"{_short(item.get('tier'), 9)} {int(item.get('history_days') or 0)}g  •  "
+                f"Güven {_score(item.get('confidence'))}  │  R {risk_text} {_short(item.get('risk_band'), 10)}",
+                f"M {_score(item.get('momentum_score'))}  •  T {_score(item.get('trend_score'))}  •  "
+                f"A {_score(item.get('flow_score'))}  │  1A {_pct(item.get('return_1m'))}  •  3A {_pct(item.get('return_3m'))}",
+                f"{_compact_founder(item.get('founder'))}  /  {_short(item.get('category'), 16)}  •  {_tefas_label(item.get('tefas_status'))}",
             ])
         )
     await _send_table(
-        "🌱 <b>YENİ FON RADARI</b>  ·  İlk 20",
+        "🌱 <b>YENİ FON RADARI</b> · İlk 20\n<i>M: momentum  •  T: trend  •  A: para akışı</i>",
         (payload or {}).get("signal_date"),
         rows,
         "Radarın sıkı koşullarını geçen yeni fon bulunamadı.",
