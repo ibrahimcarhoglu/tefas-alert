@@ -6,7 +6,7 @@ import re
 import sqlite3
 from telegram import Bot
 from telegram.constants import ParseMode
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DB_PATH
+from config import ANOMALY_NOTIFICATIONS_ENABLED, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DB_PATH
 from database import get_dashboard_data
 
 logger = logging.getLogger(__name__)
@@ -252,6 +252,9 @@ async def send_performance_card(payload: dict, limit: int = 10) -> None:
 
 async def send_anomaly_card(payload: dict, limit: int = 10) -> None:
     """Gruplanmış anomalileri önem sıralı PNG olarak gönder; boşsa sessiz kal."""
+    if not ANOMALY_NOTIFICATIONS_ENABLED:
+        logger.info("Anomali Telegram bildirimi kullanıcı tercihiyle kapalı")
+        return
     rows = list((payload or {}).get("anomalies") or [])
     if not rows:
         return
@@ -326,6 +329,9 @@ async def send_periodic_summary(date_str: str, periodic_results: dict):
         await _send_message("\n".join(lines))
 
 async def send_anomaly_alerts(anomalies: list[dict], date: str):
+    if not ANOMALY_NOTIFICATIONS_ENABLED:
+        logger.info("Anomali Telegram bildirimi kullanıcı tercihiyle kapalı")
+        return
     if not anomalies:
         return
     lines = [

@@ -46,8 +46,6 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
-          Z_SCORE_THRESHOLD: 2.5
-          DAILY_RETURN_THRESHOLD: 5.0
           FUND_TYPE: YAT
         run: |
           python run_action.py

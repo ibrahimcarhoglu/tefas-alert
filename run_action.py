@@ -13,9 +13,7 @@ from pytefas import Crawler
 sys.path.append(os.getcwd())
 from database import init_db, get_recent_data
 from fetcher import fetch_and_store
-from anomaly import detect_anomalies
 from alerts import (
-    send_anomaly_card,
     send_latest_signal_images,
     send_market_pulse_card,
     send_performance_card,
@@ -327,7 +325,6 @@ def run_once():
             build_market_pulse,
             build_performance_continuation,
             enrich_rotation_changes,
-            group_anomalies,
         )
         rotation = run_weekly_rotation(found_date)
         if rotation.get("generated"):
@@ -339,9 +336,6 @@ def run_once():
             except Exception:
                 logger.exception("Rotasyon üretildi ancak backtest güncellenemedi")
 
-        anomalies = detect_anomalies(found_date)
-        asyncio.run(send_anomaly_card(group_anomalies(anomalies, found_date), limit=10))
-        
         logger.info("Sosyal medya ve haber trendleri analiz ediliyor...")
         # Collect names for all fund categories (YAT, BYF, EMK)
         names_dict = {}
