@@ -12,7 +12,7 @@ from pytefas import Crawler
 
 sys.path.append(os.getcwd())
 from database import init_db, get_recent_data
-from fetcher import fetch_and_store
+from fetcher import fetch_and_store, fetch_range_and_store
 from alerts import (
     send_latest_signal_images,
     send_market_pulse_card,
@@ -23,6 +23,9 @@ from alerts import (
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+MIN_SIGNAL_HISTORY_DAYS = 254
+HISTORY_BACKFILL_CALENDAR_DAYS = 430
 
 # Tarayıcı gibi görünmek için genişletilmiş header seti
 HTTP_HEADERS = {
@@ -286,6 +289,102 @@ def run_social_momentum_job() -> dict:
     )
     return payload
 
+
+def _signal_history_day_count(end_date: str) -> int:
+    from database import get_connection
+
+    conn = get_connection()
+    try:
+        return int(conn.execute(
+            "SELECT COUNT(DISTINCT date) FROM fund_daily WHERE date <= ?",
+            (end_date,),
+        ).fetchone()[0] or 0)
+    finally:
+        conn.close()
+
+
+def ensure_signal_history(end_date: str) -> bool:
+    """GitHub cache eksikse haftalık model için TEFAS geçmişini otomatik tamamla."""
+    current_days = _signal_history_day_count(end_date)
+    if current_days >= MIN_SIGNAL_HISTORY_DAYS:
+        return True
+
+    start_date = (
+        datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=HISTORY_BACKFILL_CALENDAR_DAYS)
+    ).strftime("%Y-%m-%d")
+    logger.warning(
+        "Sinyal geçmişi eksik (%d/%d işlem günü); %s-%s aralığı tamamlanıyor.",
+        current_days, MIN_SIGNAL_HISTORY_DAYS, start_date, end_date,
+    )
+    try:
+        fetch_range_and_store(start_date, end_date)
+    except Exception:
+        logger.exception("TEFAS sinyal geçmişi otomatik tamamlanamadı")
+        return False
+
+    refreshed_days = _signal_history_day_count(end_date)
+    if refreshed_days < MIN_SIGNAL_HISTORY_DAYS:
+        logger.error(
+            "Geçmiş tamamlandı ancak model için yetersiz kaldı: %d/%d işlem günü.",
+            refreshed_days, MIN_SIGNAL_HISTORY_DAYS,
+        )
+        return False
+    logger.info("Sinyal geçmişi hazır: %d işlem günü.", refreshed_days)
+    return True
+
+
+def _safely(label: str, action):
+    """Bir bildirim kanalındaki hata diğer Telegram kartlarını engellemesin."""
+    try:
+        return action()
+    except Exception:
+        logger.exception("%s başarısız oldu; diğer bildirimlerle devam ediliyor", label)
+        return None
+
+
+def _run_rotation_and_signal_cards(found_date: str, force: bool = False) -> None:
+    from signals import run_backtest, run_weekly_rotation
+    from market_notifications import enrich_rotation_changes
+
+    if not ensure_signal_history(found_date):
+        logger.warning("Haftalık rotasyon atlandı; günlük Telegram kartları devam edecek.")
+        return
+    try:
+        rotation = run_weekly_rotation(found_date, force=force)
+    except Exception:
+        logger.exception("Haftalık rotasyon üretilemedi; günlük Telegram kartları devam edecek")
+        return
+    if not rotation.get("generated"):
+        return
+
+    _safely(
+        "Haftalık Rotasyon kartı",
+        lambda: asyncio.run(send_rotation_card(enrich_rotation_changes(rotation), limit=20)),
+    )
+    _safely(
+        "Ana ve Yeni Fon radarı",
+        lambda: asyncio.run(send_latest_signal_images(limit=20)),
+    )
+    try:
+        backtest = run_backtest(max_dates=1000)
+        logger.info("Backtest güncellendi: %s dönem", backtest["metrics"]["periods"])
+    except Exception:
+        logger.exception("Rotasyon üretildi ancak backtest güncellenemedi")
+
+
+def _send_daily_cards(found_date: str) -> None:
+    from market_notifications import build_market_pulse, build_performance_continuation
+
+    _safely("Sosyal Momentum Radarı", run_social_momentum_job)
+    _safely(
+        "Günlük Piyasa Nabzı",
+        lambda: asyncio.run(send_market_pulse_card(build_market_pulse(found_date, limit=5), limit=5)),
+    )
+    _safely(
+        "Getiri ve Devamlılık",
+        lambda: asyncio.run(send_performance_card(build_performance_continuation(found_date, limit=10), limit=10)),
+    )
+
 def run_once():
     init_db()
     c = Crawler()
@@ -311,30 +410,18 @@ def run_once():
     
     if found_date and previous_latest and found_date <= previous_latest:
         if os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch":
-            logger.info("Manuel çalıştırma: son ana liste ve yeni fon radarı Telegram'a gönderiliyor.")
-            asyncio.run(send_latest_signal_images(limit=20))
+            logger.info("Manuel çalıştırma: geçmiş onarılıp tüm radar kartları gönderiliyor.")
+            _run_rotation_and_signal_cards(found_date, force=True)
+            _send_daily_cards(found_date)
+            return
         # Sosyal ilgi hafta sonu veya yeni TEFAS verisi olmayan günlerde de değişebilir.
         # Bu nedenle yalnızca sosyal radar günlük üretilir; ana sinyal yinelenmez.
-        run_social_momentum_job()
+        _safely("Sosyal Momentum Radarı", run_social_momentum_job)
         logger.info("Yeni TEFAS işlem günü yok; ana sinyaller yinelenmedi (son tarih: %s).", previous_latest)
         return
 
     if found_date:
-        from signals import run_backtest, run_weekly_rotation
-        from market_notifications import (
-            build_market_pulse,
-            build_performance_continuation,
-            enrich_rotation_changes,
-        )
-        rotation = run_weekly_rotation(found_date)
-        if rotation.get("generated"):
-            asyncio.run(send_rotation_card(enrich_rotation_changes(rotation), limit=20))
-            asyncio.run(send_latest_signal_images(limit=20))
-            try:
-                backtest = run_backtest(max_dates=1000)
-                logger.info("Backtest güncellendi: %s dönem", backtest["metrics"]["periods"])
-            except Exception:
-                logger.exception("Rotasyon üretildi ancak backtest güncellenemedi")
+        _run_rotation_and_signal_cards(found_date)
 
         logger.info("Sosyal medya ve haber trendleri analiz ediliyor...")
         # Collect names for all fund categories (YAT, BYF, EMK)
@@ -355,10 +442,7 @@ def run_once():
         except Exception as e:
             logger.error("Fon isimleri güncellenemedi: %s", e)
         
-        run_social_momentum_job()
-
-        asyncio.run(send_market_pulse_card(build_market_pulse(found_date, limit=5), limit=5))
-        asyncio.run(send_performance_card(build_performance_continuation(found_date, limit=10), limit=10))
+        _send_daily_cards(found_date)
 
 if __name__ == "__main__":
     run_once()

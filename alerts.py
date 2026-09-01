@@ -18,9 +18,20 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 TEFAS_URL = "https://www.tefas.gov.tr/FonAnaliz.aspx?FonKod="
 
+def _require_telegram_config() -> None:
+    missing = []
+    if not TELEGRAM_BOT_TOKEN:
+        missing.append("TELEGRAM_BOT_TOKEN")
+    if not TELEGRAM_CHAT_ID:
+        missing.append("TELEGRAM_CHAT_ID")
+    if missing:
+        raise RuntimeError(f"Telegram ayarı eksik: {', '.join(missing)}")
+
+
 async def _send_message(text: str):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not text:
+    if not text:
         return
+    _require_telegram_config()
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     try:
         await bot.send_message(
@@ -31,11 +42,14 @@ async def _send_message(text: str):
         )
     except Exception as e:
         logger.error("Mesaj gönderilemedi: %s", e)
+        raise
+    logger.info("Telegram metin mesajı teslim edildi")
 
 
 async def _send_photo_bytes(data: bytes, filename: str, caption: str) -> None:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not data:
+    if not data:
         return
+    _require_telegram_config()
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     photo = io.BytesIO(data)
     photo.name = filename
@@ -49,6 +63,7 @@ async def _send_photo_bytes(data: bytes, filename: str, caption: str) -> None:
     except Exception as exc:
         logger.error("Görsel mesaj gönderilemedi: %s", exc)
         raise
+    logger.info("Telegram görseli teslim edildi: %s", filename)
 
 def _fmt_try(amount: float) -> str:
     if amount is None:
